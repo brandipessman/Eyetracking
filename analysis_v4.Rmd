@@ -1,0 +1,4154 @@
+---
+title: "Eye-tracking Analysis"
+author: "Brandi Pessman"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r libraries and import}
+library(tidyverse)
+library(emmeans)
+library(afex)
+library(ggpubr)
+library(here)
+library(glmmTMB)
+library(DHARMa)
+library(MASS)
+
+data <- read.csv("SpiderPairedData.csv")
+subject_info <- data %>% 
+  dplyr::select(Subject, Gender, SpiderPhobia, PhobiaRank)
+
+rm_df <- read.csv("repeated_measures.csv") %>% 
+  mutate(RECORDING_SESSION_LABEL = as.character(RECORDING_SESSION_LABEL))
+
+averages <- readRDS("averages.RDS")
+
+options(scipen = 999)
+```
+
+In the butterfly section, I included some comments of what each line does since the remaining chunks are formatted very similarly.
+
+```{r butterfly}
+# total dwell time dataframe which grabs the spider and non-spider columns for dwell time for a single question and makes two rows per subject (one of their dwell time for each photo in the pair)
+# dt <- data %>% 
+#   dplyr::select(Subject, Gender, PhobiaRank, DT2_Spider, DT2_Butterfly) %>% 
+#   pivot_longer(cols = c(DT2_Spider:DT2_Butterfly), 
+#                names_to = "image", 
+#                values_to = "dwell_time") %>% 
+#   # relabels the photo description in the image column
+#   mutate(image = fct_recode(image, "Q1_Spider" = "DT2_Spider",
+#                                    "Q1_Butterfly" = "DT2_Butterfly"),
+#          # makes sure that Spider would be left of Butterfly on a graph
+#          image = fct_relevel(image, "Q1_Spider", "Q1_Butterfly"),
+#          # makes sure Gender and PhobiaRank are factors
+#          Gender = factor(Gender),
+#          PhobiaRank = factor(PhobiaRank))
+# 
+# # same for first run dwell time
+# frdt <- data %>% 
+#   dplyr::select(Subject, Gender, PhobiaRank, FRDT2_Spider, FRDT2_Butterfly) %>% 
+#   pivot_longer(cols = c(FRDT2_Spider:FRDT2_Butterfly), 
+#                names_to = "image", 
+#                values_to = "first_run_dwell_time") %>% 
+#   mutate(image = fct_recode(image, "Q1_Spider" = "FRDT2_Spider",
+#                                    "Q1_Butterfly" = "FRDT2_Butterfly"),
+#          image = fct_relevel(image, "Q1_Spider", "Q1_Butterfly"),
+#          Gender = factor(Gender),
+#          PhobiaRank = factor(PhobiaRank))
+# 
+# # same for first fixation time
+# fft <- data %>% 
+#   dplyr::select(Subject, Gender, PhobiaRank, FFT2_Spider, FFT2_Butterfly) %>% 
+#   pivot_longer(cols = c(FFT2_Spider:FFT2_Butterfly), 
+#                names_to = "image", 
+#                values_to = "first_fixation_time") %>% 
+#   mutate(image = fct_recode(image, "Q1_Spider" = "FFT2_Spider",
+#                                    "Q1_Butterfly" = "FFT2_Butterfly"),
+#          image = fct_relevel(image, "Q1_Spider", "Q1_Butterfly"),
+#          Gender = factor(Gender),
+#          PhobiaRank = factor(PhobiaRank))
+# 
+# # same for run count
+# rc <- data %>% 
+#   dplyr::select(Subject, Gender, PhobiaRank, RC2_Spider, RC2_Butterfly) %>% 
+#   pivot_longer(cols = c(RC2_Spider:RC2_Butterfly), 
+#                names_to = "image", 
+#                values_to = "run_count") %>% 
+#   mutate(image = fct_recode(image, "Q1_Spider" = "RC2_Spider",
+#                                    "Q1_Butterfly" = "RC2_Butterfly"),
+#          image = fct_relevel(image, "Q1_Spider", "Q1_Butterfly"),
+#          Gender = factor(Gender),
+#          PhobiaRank = factor(PhobiaRank))
+# 
+# # since full_join only allows the joining of two dataframes
+# # join dwell time and first run dwell time
+# butterfly1 <- full_join(dt, frdt, 
+#                         by = c("Subject", "Gender", "PhobiaRank", "image"))
+# # join first fixation time and run count
+# butterfly2 <- full_join(fft, rc, 
+#                         by = c("Subject", "Gender", "PhobiaRank", "image"))
+# # join the two partial to have all four variables in a single frame
+# butterfly <- full_join(butterfly1, butterfly2, 
+#                        by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+butterfly <- averages %>% filter(Question == 2) %>% 
+  mutate(image = factor(image),
+         image = fct_recode(image, "Q1_Spider" = "Spider",
+                            "Q1_Butterfly" = "Butterfly"),
+         image = fct_relevel(image, "Q1_Spider", "Q1_Butterfly"))
+
+# Three-way repeated measures ANOVA using the subject averages
+dwell <- aov_ez(id = "Subject", # individual identifier
+                dv = "dwell_time", # the dependent variable
+                data = butterfly, # the dataframe
+                within = "image", #the within-subjects variable 
+                between = c("Gender", "PhobiaRank")) # the between-subjects variables
+# get the results of the ANOVA test
+summary(dwell)
+# get the predictions from the model
+Q1_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+# Run a Tukey Honest Significant Differences (HSD) test on the significant interaction
+emmeans(dwell, pairwise ~ image * Gender, adjust = "tukey")
+# get the predictions from the model for the I x G interaction
+Q1_ig_dt_predictions <- data.frame(question = "Q1", 
+                            emmeans(dwell, ~ image:Gender)) %>% 
+   separate(image, c("question", "photo"), sep = "_") %>% 
+   mutate(photo = fct_relevel(photo, "Spider", "Butterfly")) %>% 
+   dplyr::select(-lower.CL, -upper.CL)
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = butterfly,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q1_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = butterfly,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q1_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = butterfly,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q1_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+```{r insect}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT5a_Spider, DT5a_Insect) %>% 
+  pivot_longer(cols = c(DT5a_Spider:DT5a_Insect), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q2_Spider" = "DT5a_Spider",
+                                   "Q2_Insect" = "DT5a_Insect"),
+         image = fct_relevel(image, "Q2_Spider", "Q2_Insect"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT5a_Spider, FRDT5a_Insect) %>% 
+  pivot_longer(cols = c(FRDT5a_Spider:FRDT5a_Insect), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q2_Spider" = "FRDT5a_Spider",
+                                   "Q2_Insect" = "FRDT5a_Insect"),
+         image = fct_relevel(image, "Q2_Spider", "Q2_Insect"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT5a_Spider, FFT5a_Insect) %>% 
+  pivot_longer(cols = c(FFT5a_Spider:FFT5a_Insect), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q2_Spider" = "FFT5a_Spider",
+                                   "Q2_Insect" = "FFT5a_Insect"),
+         image = fct_relevel(image, "Q2_Spider", "Q2_Insect"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC5a_Spider, RC5a_Insect) %>% 
+  pivot_longer(cols = c(RC5a_Spider:RC5a_Insect), 
+              names_to = "image", 
+              values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q2_Spider" = "RC5a_Spider",
+                                   "Q2_Insect" = "RC5a_Insect"),
+         image = fct_relevel(image, "Q2_Spider", "Q2_Insect"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+insect1 <- full_join(dt, frdt, 
+                     by = c("Subject", "Gender", "PhobiaRank", "image"))
+insect2 <- full_join(fft, rc, 
+                     by = c("Subject", "Gender", "PhobiaRank", "image"))
+insect <- full_join(insect1, insect2, 
+                    by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#insect <- averages %>% filter(Question == 5, Image == "GeneralInsect" | Image == "GeneralSpider1")
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = insect,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q2_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = insect,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q2_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = insect,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q2_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = insect,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q2_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+```{r insect eyes}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT3b_6eyeSp, DT3b_2eyeIn) %>% 
+  pivot_longer(cols = c(DT3b_6eyeSp:DT3b_2eyeIn), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q3_Spider" = "DT3b_6eyeSp",
+                                   "Q3_Insect Eyes" = "DT3b_2eyeIn"),
+         image = fct_relevel(image, "Q3_Spider", "Q3_Insect Eyes"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT3b_6eyeSp, FRDT3b_2eyeIn) %>% 
+  pivot_longer(cols = c(FRDT3b_6eyeSp:FRDT3b_2eyeIn), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q3_Spider" = "FRDT3b_6eyeSp",
+                                   "Q3_Insect Eyes" = "FRDT3b_2eyeIn"),
+         image = fct_relevel(image, "Q3_Spider", "Q3_Insect Eyes"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT3b_6eyeSp, FFT3b_2eyeIn) %>% 
+  pivot_longer(cols = c(FFT3b_6eyeSp:FFT3b_2eyeIn), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q3_Spider" = "FFT3b_6eyeSp",
+                                   "Q3_Insect Eyes" = "FFT3b_2eyeIn"),
+         image = fct_relevel(image, "Q3_Spider", "Q3_Insect Eyes"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC3b_6eyeSp, RC3b_2eyeIn) %>% 
+  pivot_longer(cols = c(RC3b_6eyeSp:RC3b_2eyeIn), 
+               names_to = "image", 
+               values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q3_Spider" = "RC3b_6eyeSp",
+                                   "Q3_Insect Eyes" = "RC3b_2eyeIn"),
+         image = fct_relevel(image, "Q3_Spider", "Q3_Insect Eyes"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+insecteyes1 <- full_join(dt, frdt, 
+                         by = c("Subject", "Gender", "PhobiaRank", "image"))
+insecteyes2 <- full_join(fft, rc, 
+                         by = c("Subject", "Gender", "PhobiaRank", "image"))
+insecteyes <- full_join(insecteyes1, insecteyes2, 
+                        by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#insecteyes <- averages %>% filter(Question == 3, Image == "2eyedinsect"| Image == "6eyedspider")
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = insecteyes,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q3_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = insecteyes,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q3_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = insecteyes,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q3_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = insecteyes,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q3_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+```{r arachnid}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT5c_Spider, DT5c_NonArac) %>% 
+  pivot_longer(cols = c(DT5c_Spider:DT5c_NonArac), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q4_Spider" = "DT5c_Spider",
+                                   "Q4_Non-Spider Arachnid" = "DT5c_NonArac"),
+         image = fct_relevel(image, "Q4_Spider", "Q4_Non-Spider Arachnid"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT5c_Spider, FRDT5c_NonArac) %>% 
+  pivot_longer(cols = c(FRDT5c_Spider:FRDT5c_NonArac), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q4_Spider" = "FRDT5c_Spider",
+                                   "Q4_Non-Spider Arachnid" = "FRDT5c_NonArac"),
+         image = fct_relevel(image, "Q4_Spider", "Q4_Non-Spider Arachnid"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT5c_Spider, FFT5c_NonArac) %>% 
+  pivot_longer(cols = c(FFT5c_Spider:FFT5c_NonArac), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q4_Spider" = "FFT5c_Spider",
+                                   "Q4_Non-Spider Arachnid" = "FFT5c_NonArac"),
+         image = fct_relevel(image, "Q4_Spider", "Q4_Non-Spider Arachnid"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC5c_Spider, RC5c_NonArac) %>% 
+  pivot_longer(cols = c(RC5c_Spider:RC5c_NonArac), 
+               names_to = "image", 
+               values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q4_Spider" = "RC5c_Spider",
+                                   "Q4_Non-Spider Arachnid" = "RC5c_NonArac"),
+         image = fct_relevel(image, "Q4_Spider", "Q4_Non-Spider Arachnid"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+arachnid1 <- full_join(dt, frdt, 
+                       by = c("Subject", "Gender", "PhobiaRank", "image"))
+arachnid2 <- full_join(fft, rc, 
+                       by = c("Subject", "Gender", "PhobiaRank", "image"))
+arachnid <- full_join(arachnid1, arachnid2, 
+                      by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#arachnid <- averages %>% filter(Question == 5, Image == "NonSArachnid" | Image == "GeneralSpider3")
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = arachnid,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q4_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+emmeans(dwell, pairwise ~ image * Gender, adjust = "tukey")
+emmeans(dwell, pairwise ~ image * Gender * PhobiaRank, adjust = "tukey")
+Q4_igp_dt_predictions <- data.frame(emmeans(dwell, ~ image:Gender:PhobiaRank)) %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_recode(photo, "Spider" = "Spider",
+                            "Non-Spider Arachnid" = "Non.Spider.Arachnid"),
+         photo = fct_relevel(photo, "Spider", "Non-Spider Arachnid")) %>% 
+  dplyr::select(-lower.CL, -upper.CL)
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = arachnid,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q4_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+emmeans(first_dwell, pairwise ~ image * Gender * PhobiaRank, adjust = "tukey")
+Q4_igp_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image:Gender:PhobiaRank)) %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_recode(photo, "Spider" = "Spider",
+                            "Non-Spider Arachnid" = "Non.Spider.Arachnid"),
+         photo = fct_relevel(photo, "Spider", "Non-Spider Arachnid")) %>% 
+  dplyr::select(-lower.CL, -upper.CL)
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = arachnid,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q4_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+emmeans(first_fix, pairwise ~ image * Gender * PhobiaRank, adjust = "tukey")
+Q4_igp_fft_predictions <- data.frame(emmeans(first_fix, ~ image:Gender:PhobiaRank)) %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_recode(photo, "Spider" = "Spider",
+                            "Non-Spider Arachnid" = "Non.Spider.Arachnid"),
+         photo = fct_relevel(photo, "Spider", "Non-Spider Arachnid")) %>% 
+  dplyr::select(-lower.CL, -upper.CL)
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = arachnid,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q4_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+```{r myriapod}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT5b_Spider, DT5b_Myriapod) %>% 
+  pivot_longer(cols = c(DT5b_Spider:DT5b_Myriapod), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q5_Spider" = "DT5b_Spider",
+                                   "Q5_Myriapod" = "DT5b_Myriapod"),
+         image = fct_relevel(image, "Q5_Spider", "Q5_Myriapod"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT5b_Spider, FRDT5b_Myriapod) %>% 
+  pivot_longer(cols = c(FRDT5b_Spider:FRDT5b_Myriapod), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q5_Spider" = "FRDT5b_Spider",
+                                   "Q5_Myriapod" = "FRDT5b_Myriapod"),
+         image = fct_relevel(image, "Q5_Spider", "Q5_Myriapod"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT5b_Spider, FFT5b_Myriapod) %>% 
+  pivot_longer(cols = c(FFT5b_Spider:FFT5b_Myriapod), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q5_Spider" = "FFT5b_Spider",
+                                   "Q5_Myriapod" = "FFT5b_Myriapod"),
+         image = fct_relevel(image, "Q5_Spider", "Q5_Myriapod"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC5b_Spider, RC5b_Myriapod) %>% 
+  pivot_longer(cols = c(RC5b_Spider:RC5b_Myriapod), 
+               names_to = "image", 
+               values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q5_Spider" = "RC5b_Spider",
+                                   "Q5_Myriapod" = "RC5b_Myriapod"),
+         image = fct_relevel(image, "Q5_Spider", "Q5_Myriapod"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+myriapod1 <- full_join(dt, frdt, 
+                       by = c("Subject", "Gender", "PhobiaRank", "image"))
+myriapod2 <- full_join(fft, rc, 
+                       by = c("Subject", "Gender", "PhobiaRank", "image"))
+myriapod <- full_join(myriapod1, myriapod2, 
+                      by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#myriapod <- averages %>% filter(Question == 5, Image == "GeneralMyriapod" | Image == "GeneralSpider2")
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = myriapod,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q5_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = myriapod,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q5_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+emmeans(first_dwell, pairwise ~ image * Gender, adjust = "tukey")
+Q5_ig_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image:Gender)) %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_relevel(photo, "Spider", "Myriapod")) %>% 
+  dplyr::select(-lower.CL, -upper.CL)
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = myriapod,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q5_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = myriapod,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q5_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+I found a I x G x P interaction in dwell time that was not reported in the paper for scorpion, but the post hoc analysis reveals no significant differences.
+
+```{r scorpion}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT11_NonScorp, DT11_Scorpion) %>% 
+  pivot_longer(cols = c(DT11_NonScorp:DT11_Scorpion), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q6_Spider" = "DT11_NonScorp",
+                                   "Q6_Scorpion" = "DT11_Scorpion"),
+         image = fct_relevel(image, "Q6_Spider", "Q6_Scorpion"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT11_NonScorp, FRDT11_Scorpion) %>% 
+  pivot_longer(cols = c(FRDT11_NonScorp:FRDT11_Scorpion), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q6_Spider" = "FRDT11_NonScorp",
+                                   "Q6_Scorpion" = "FRDT11_Scorpion"),
+         image = fct_relevel(image, "Q6_Spider", "Q6_Scorpion"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT11_Non.Scorp, FFT11_Scorpion) %>% 
+  pivot_longer(cols = c(FFT11_Non.Scorp:FFT11_Scorpion), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q6_Spider" = "FFT11_Non.Scorp",
+                                   "Q6_Scorpion" = "FFT11_Scorpion"),
+         image = fct_relevel(image, "Q6_Spider", "Q6_Scorpion"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC11_NonScorp, RC11_Scorpion) %>% 
+  pivot_longer(cols = c(RC11_NonScorp:RC11_Scorpion), 
+               names_to = "image", 
+               values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q6_Spider" = "RC11_NonScorp",
+                                   "Q6_Scorpion" = "RC11_Scorpion"),
+         image = fct_relevel(image, "Q6_Spider", "Q6_Scorpion"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+scorpion1 <- full_join(dt, frdt, 
+                       by = c("Subject", "Gender", "PhobiaRank", "image"))
+scorpion2 <- full_join(fft, rc, 
+                       by = c("Subject", "Gender", "PhobiaRank", "image"))
+scorpion <- full_join(scorpion1, scorpion2, 
+                      by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#scorpion <- averages %>% filter(Question == 11)
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = scorpion,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q6_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+emmeans(dwell, pairwise ~ image * PhobiaRank, adjust = "tukey")
+emmeans(dwell, pairwise ~ image * Gender * PhobiaRank, adjust = "tukey")
+Q6_ip_dt_predictions <- data.frame(emmeans(dwell, ~ image:PhobiaRank)) %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_relevel(photo, "Spider", "Scorpion")) %>% 
+  dplyr::select(-lower.CL, -upper.CL)
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = scorpion,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q6_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+emmeans(first_dwell, pairwise ~ image * Gender, adjust = "tukey")
+Q6_ig_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image:Gender)) %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_relevel(photo, "Spider", "Scorpion")) %>% 
+  dplyr::select(-lower.CL, -upper.CL)
+emmeans(first_dwell, pairwise ~ image * PhobiaRank, adjust = "tukey")
+Q6_ip_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image:PhobiaRank)) %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_relevel(photo, "Spider", "Scorpion")) %>% 
+  dplyr::select(-lower.CL, -upper.CL)
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = scorpion,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q6_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+emmeans(first_fix, pairwise ~ image * PhobiaRank, adjust = "tukey")
+Q6_ip_fft_predictions <- data.frame(emmeans(first_fix, ~ image:PhobiaRank)) %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_relevel(photo, "Spider", "Scorpion")) %>% 
+  dplyr::select(-lower.CL, -upper.CL)
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = scorpion,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q6_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+```{r eye size}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT3a_6PlusEyes, DT3a_JS) %>% 
+  pivot_longer(cols = c(DT3a_6PlusEyes:DT3a_JS), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q7_Smaller Eyes" = "DT3a_6PlusEyes",
+                                   "Q7_Enlarged Eyes" = "DT3a_JS"),
+         image = fct_relevel(image, "Q7_Smaller Eyes", "Q7_Enlarged Eyes"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT3a_6PlusEyes, FRDT3a_JS) %>% 
+  pivot_longer(cols = c(FRDT3a_6PlusEyes:FRDT3a_JS), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q7_Smaller Eyes" = "FRDT3a_6PlusEyes",
+                                   "Q7_Enlarged Eyes" = "FRDT3a_JS"),
+         image = fct_relevel(image, "Q7_Smaller Eyes", "Q7_Enlarged Eyes"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT3a_6PlusEyes, FFT3a_JS) %>% 
+  pivot_longer(cols = c(FFT3a_6PlusEyes:FFT3a_JS), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q7_Smaller Eyes" = "FFT3a_6PlusEyes",
+                                   "Q7_Enlarged Eyes" = "FFT3a_JS"),
+         image = fct_relevel(image, "Q7_Smaller Eyes", "Q7_Enlarged Eyes"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC3a_6PlusEyes, RC3a_JS) %>% 
+  pivot_longer(cols = c(RC3a_6PlusEyes:RC3a_JS), 
+               names_to = "image", 
+               values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q7_Smaller Eyes" = "RC3a_6PlusEyes",
+                                   "Q7_Enlarged Eyes" = "RC3a_JS"),
+         image = fct_relevel(image, "Q7_Smaller Eyes", "Q7_Enlarged Eyes"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+eyes_size1 <- full_join(dt, frdt, 
+                        by = c("Subject", "Gender", "PhobiaRank", "image"))
+eyes_size2 <- full_join(fft, rc, 
+                        by = c("Subject", "Gender", "PhobiaRank", "image"))
+eyes_size <- full_join(eyes_size1, eyes_size2, 
+                       by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#eyes_size <- averages %>% filter(Question == 3, Image == "6ormoreeyes"| Image == "JumpingSpiders")
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = eyes_size,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q7_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = eyes_size,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q7_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = eyes_size,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q7_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = eyes_size,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q7_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+```{r color}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT4_JSNoCol, DT4_JSCol) %>% 
+  pivot_longer(cols = c(DT4_JSNoCol:DT4_JSCol), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q8_Less color" = "DT4_JSNoCol",
+                                   "Q8_More color" = "DT4_JSCol"),
+         image = fct_relevel(image, "Q8_Less color", "Q8_More color"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT4_JSNoCol, FRDT4_JSCol) %>% 
+  pivot_longer(cols = c(FRDT4_JSNoCol:FRDT4_JSCol), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q8_Less color" = "FRDT4_JSNoCol",
+                                   "Q8_More color" = "FRDT4_JSCol"),
+         image = fct_relevel(image, "Q8_Less color", "Q8_More color"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT4_JSNoCol, FFT4_JSCol) %>% 
+  pivot_longer(cols = c(FFT4_JSNoCol:FFT4_JSCol), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q8_Less color" = "FFT4_JSNoCol",
+                                   "Q8_More color" = "FFT4_JSCol"),
+         image = fct_relevel(image, "Q8_Less color", "Q8_More color"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC4_JSNoCol, RC4_JSCol) %>% 
+  pivot_longer(cols = c(RC4_JSNoCol:RC4_JSCol), 
+               names_to = "image", 
+               values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q8_Less color" = "RC4_JSNoCol",
+                                   "Q8_More color" = "RC4_JSCol"),
+         image = fct_relevel(image, "Q8_Less color", "Q8_More color"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+color1 <- full_join(dt, frdt, 
+                    by = c("Subject", "Gender", "PhobiaRank", "image"))
+color2 <- full_join(fft, rc, 
+                    by = c("Subject", "Gender", "PhobiaRank", "image"))
+color <- full_join(color1, color2, 
+                   by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#color <- averages %>% filter(Question == 4)
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = color,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q8_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = color,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q8_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+emmeans(first_dwell, pairwise ~ image * PhobiaRank, adjust = "tukey")
+Q8_ip_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image:PhobiaRank)) %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_recode(photo, "More color" = "More.color",
+                            "Less color" = "Less.color"),
+         photo = fct_relevel(photo, "Less color", "More color")) %>% 
+  dplyr::select(-lower.CL, -upper.CL)
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = color,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q8_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = color,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q8_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+```{r web}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT6_Ground, DT6_Web) %>% 
+  pivot_longer(cols = c(DT6_Ground:DT6_Web), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q9_No web" = "DT6_Ground",
+                                   "Q9_Web" = "DT6_Web"),
+         image = fct_relevel(image, "Q9_No web", "Q9_Web"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT6_Ground, FRDT6_Web) %>% 
+  pivot_longer(cols = c(FRDT6_Ground:FRDT6_Web), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q9_No web" = "FRDT6_Ground",
+                                   "Q9_Web" = "FRDT6_Web"),
+         image = fct_relevel(image, "Q9_No web", "Q9_Web"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT6_Ground, FFT6_Web) %>% 
+  pivot_longer(cols = c(FFT6_Ground:FFT6_Web), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q9_No web" = "FFT6_Ground",
+                                   "Q9_Web" = "FFT6_Web"),
+         image = fct_relevel(image, "Q9_No web", "Q9_Web"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC6_Ground, RC6_Web) %>% 
+  pivot_longer(cols = c(RC6_Ground:RC6_Web), 
+               names_to = "image", 
+               values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q9_No web" = "RC6_Ground",
+                                   "Q9_Web" = "RC6_Web"),
+         image = fct_relevel(image, "Q9_No web", "Q9_Web"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+web1 <- full_join(dt, frdt, 
+                  by = c("Subject", "Gender", "PhobiaRank", "image"))
+web2 <- full_join(fft, rc, 
+                  by = c("Subject", "Gender", "PhobiaRank", "image"))
+web <- full_join(web1, web2, 
+                 by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#web <- averages %>% filter(Question == 6)
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = web,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q9_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = web,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q9_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = web,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q9_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = web,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q9_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+```{r eggs}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT7_NoEggs, DT7_Eggs) %>% 
+  pivot_longer(cols = c(DT7_NoEggs:DT7_Eggs), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q10_No eggs" = "DT7_NoEggs",
+                                   "Q10_Eggs" = "DT7_Eggs"),
+         image = fct_relevel(image, "Q10_No eggs", "Q10_Eggs"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT7_NoEggs, FRDT7_Eggs) %>% 
+  pivot_longer(cols = c(FRDT7_NoEggs:FRDT7_Eggs), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q10_No eggs" = "FRDT7_NoEggs",
+                                   "Q10_Eggs" = "FRDT7_Eggs"),
+         image = fct_relevel(image, "Q10_No eggs", "Q10_Eggs"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT7_NoEggs, FFT7_Eggs) %>% 
+  pivot_longer(cols = c(FFT7_NoEggs:FFT7_Eggs), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q10_No eggs" = "FFT7_NoEggs",
+                                   "Q10_Eggs" = "FFT7_Eggs"),
+         image = fct_relevel(image, "Q10_No eggs", "Q10_Eggs"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC7_NoEggs, RC7_Eggs) %>% 
+  pivot_longer(cols = c(RC7_NoEggs:RC7_Eggs), 
+               names_to = "image", 
+               values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q10_No eggs" = "RC7_NoEggs",
+                                   "Q10_Eggs" = "RC7_Eggs"),
+         image = fct_relevel(image, "Q10_No eggs", "Q10_Eggs"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+eggs1 <- full_join(dt, frdt, 
+                   by = c("Subject", "Gender", "PhobiaRank", "image"))
+eggs2 <- full_join(fft, rc, 
+                   by = c("Subject", "Gender", "PhobiaRank", "image"))
+eggs <- full_join(eggs1, eggs2, 
+                  by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#eggs <- averages %>% filter(Question == 7)
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = eggs,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q10_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = eggs,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q10_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = eggs,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q10_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = eggs,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q10_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+```{r fangs}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT9_NoFangs, DT9_Fangs) %>% 
+  pivot_longer(cols = c(DT9_NoFangs:DT9_Fangs), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q11_No fangs" = "DT9_NoFangs",
+                                   "Q11_Fangs" = "DT9_Fangs"),
+         image = fct_relevel(image, "Q11_No fangs", "Q11_Fangs"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT9_NoFangs, FRDT9_Fangs) %>% 
+  pivot_longer(cols = c(FRDT9_NoFangs:FRDT9_Fangs), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q11_No fangs" = "FRDT9_NoFangs",
+                                   "Q11_Fangs" = "FRDT9_Fangs"),
+         image = fct_relevel(image, "Q11_No fangs", "Q11_Fangs"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT9_NoFangs, FFT9_Fangs) %>% 
+  pivot_longer(cols = c(FFT9_NoFangs:FFT9_Fangs), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q11_No fangs" = "FFT9_NoFangs",
+                                   "Q11_Fangs" = "FFT9_Fangs"),
+         image = fct_relevel(image, "Q11_No fangs", "Q11_Fangs"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC9_NoFangs, RC9_Fangs) %>% 
+  pivot_longer(cols = c(RC9_NoFangs:RC9_Fangs), 
+               names_to = "image", 
+               values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q11_No fangs" = "RC9_NoFangs",
+                                   "Q11_Fangs" = "RC9_Fangs"),
+         image = fct_relevel(image, "Q11_No fangs", "Q11_Fangs"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fangs1 <- full_join(dt, frdt, 
+                    by = c("Subject", "Gender", "PhobiaRank", "image"))
+fangs2 <- full_join(fft, rc, 
+                    by = c("Subject", "Gender", "PhobiaRank", "image"))
+fangs <- full_join(fangs1, fangs2, 
+                   by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#fangs <- averages %>% filter(Question == 9)
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = fangs,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q11_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = fangs,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q11_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = fangs,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q11_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = fangs,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q11_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+emmeans(run_count, pairwise ~ image * Gender * PhobiaRank, adjust = "tukey")
+```
+
+```{r eating}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT8_NotEating, DT8_Eating) %>% 
+  pivot_longer(cols = c(DT8_NotEating:DT8_Eating), names_to = "image", values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q12_Not eating" = "DT8_NotEating",
+                                   "Q12_Eating" = "DT8_Eating"),
+         image = fct_relevel(image, "Q12_Not eating", "Q12_Eating"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT8_NotEating, FRDT8_Eating) %>% 
+  pivot_longer(cols = c(FRDT8_NotEating:FRDT8_Eating), names_to = "image", values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q12_Not eating" = "FRDT8_NotEating",
+                                   "Q12_Eating" = "FRDT8_Eating"),
+         image = fct_relevel(image, "Q12_Not eating", "Q12_Eating"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT8_NotEating, FFT8_Eating) %>% 
+  pivot_longer(cols = c(FFT8_NotEating:FFT8_Eating), names_to = "image", values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q12_Not eating" = "FFT8_NotEating",
+                                   "Q12_Eating" = "FFT8_Eating"),
+         image = fct_relevel(image, "Q12_Not eating", "Q12_Eating"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC8_NotEating, RC8_Eating) %>% 
+  pivot_longer(cols = c(RC8_NotEating:RC8_Eating), names_to = "image", values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q12_Not eating" = "RC8_NotEating",
+                                   "Q12_Eating" = "RC8_Eating"),
+         image = fct_relevel(image, "Q12_Not eating", "Q12_Eating"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+eating1 <- full_join(dt, frdt, by = c("Subject", "Gender", "PhobiaRank", "image"))
+eating2 <- full_join(fft, rc, by = c("Subject", "Gender", "PhobiaRank", "image"))
+eating <- full_join(eating1, eating2, by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#eating <- averages %>% filter(Question == 8)
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = eating,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q12_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = eating,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q12_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = eating,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q12_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = eating,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q12_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+```{r hairy}
+dt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT10_NotHairy, DT10_Hairy) %>% 
+  pivot_longer(cols = c(DT10_NotHairy:DT10_Hairy), 
+               names_to = "image", 
+               values_to = "dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q13_Not hairy" = "DT10_NotHairy",
+                                   "Q13_Hairy" = "DT10_Hairy"),
+         image = fct_relevel(image, "Q13_Not hairy", "Q13_Hairy"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+frdt <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT10_NotHairy, FRDT10_Hairy) %>% 
+  pivot_longer(cols = c(FRDT10_NotHairy:FRDT10_Hairy), 
+               names_to = "image", 
+               values_to = "first_run_dwell_time") %>% 
+  mutate(image = fct_recode(image, "Q13_Not hairy" = "FRDT10_NotHairy",
+                                   "Q13_Hairy" = "FRDT10_Hairy"),
+         image = fct_relevel(image, "Q13_Not hairy", "Q13_Hairy"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+fft <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT10_NotHairy, FFT10_Hairy) %>% 
+  pivot_longer(cols = c(FFT10_NotHairy:FFT10_Hairy), 
+               names_to = "image", 
+               values_to = "first_fixation_time") %>% 
+  mutate(image = fct_recode(image, "Q13_Not hairy" = "FFT10_NotHairy",
+                                   "Q13_Hairy" = "FFT10_Hairy"),
+         image = fct_relevel(image, "Q13_Not hairy", "Q13_Hairy"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+rc <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC10_NotHairy, RC10_Hairy) %>% 
+  pivot_longer(cols = c(RC10_NotHairy:RC10_Hairy), 
+               names_to = "image", 
+               values_to = "run_count") %>% 
+  mutate(image = fct_recode(image, "Q13_Not hairy" = "RC10_NotHairy",
+                                   "Q13_Hairy" = "RC10_Hairy"),
+         image = fct_relevel(image, "Q13_Not hairy", "Q13_Hairy"),
+         Gender = factor(Gender),
+         PhobiaRank = factor(PhobiaRank))
+
+hairy1 <- full_join(dt, frdt, 
+                    by = c("Subject", "Gender", "PhobiaRank", "image"))
+hairy2 <- full_join(fft, rc, 
+                    by = c("Subject", "Gender", "PhobiaRank", "image"))
+hairy <- full_join(hairy1, hairy2, 
+                   by = c("Subject", "Gender", "PhobiaRank", "image"))
+
+#hairy <- averages %>% filter(Question == 10)
+
+dwell <- aov_ez(id = "Subject",
+                dv = "dwell_time",
+                data = hairy,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(dwell)
+Q13_image_dt_predictions <- data.frame(emmeans(dwell, ~ image))
+
+first_dwell <- aov_ez(id = "Subject",
+                dv = "first_run_dwell_time",
+                data = hairy,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_dwell)
+Q13_image_frdt_predictions <- data.frame(emmeans(first_dwell, ~ image))
+
+first_fix <- aov_ez(id = "Subject",
+                dv = "first_fixation_time",
+                data = hairy,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(first_fix)
+Q13_image_fft_predictions <- data.frame(emmeans(first_fix, ~ image))
+
+run_count <- aov_ez(id = "Subject",
+                dv = "run_count",
+                data = hairy,
+                within = "image",
+                between = c("Gender", "PhobiaRank"))
+summary(run_count)
+Q13_image_rc_predictions <- data.frame(emmeans(run_count, ~ image))
+```
+
+This is where I prepare the data for graphing.
+
+```{r wrangle for graphs}
+# dwell time, spider vs non-spider
+# binds the predictions calculated in earlier chunks
+dt_predictions_SpiderVsNonSpider <- rbind(Q1_image_dt_predictions, 
+                                          Q2_image_dt_predictions, 
+                                          Q3_image_dt_predictions, 
+                                          Q4_image_dt_predictions, 
+                                          Q5_image_dt_predictions, 
+                                          Q6_image_dt_predictions) 
+# fixes the labels as they will appear on the graph
+dt_predictions_SpiderVsNonSpider$photo <- factor(dt_predictions_SpiderVsNonSpider$image,
+                        levels = c("Q1_Spider", "Q1_Butterfly", 
+                                   "Q2_Spider", "Q2_Insect", 
+                                   "Q3_Spider", "Q3_Insect.Eyes", 
+                                   "Q4_Spider", "Q4_Non.Spider.Arachnid", 
+                                   "Q5_Spider", "Q5_Myriapod", 
+                                   "Q6_Spider", "Q6_Scorpion"),
+                        labels = c("Spider", "Butterfly", 
+                                   "Spider", "Insect", 
+                                   "Spider", "Insect Eyes", 
+                                   "Spider", "Non-Spider Arachnid", 
+                                   "Spider", "Myriapod", 
+                                   "Spider", "Scorpion"))
+dt_predictions_SpiderVsNonSpider <- dt_predictions_SpiderVsNonSpider %>% 
+# creats a new label for the type of image so we can use it to color the graph
+  mutate(spider_yn = ifelse(photo == "Spider", "Spider", "Non-Spider"),
+         spider_yn = fct_relevel(spider_yn, "Spider", "Non-Spider")) %>% 
+# creates a question column to make the groups in the graph
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+# cleans up with only the columns of interest
+  dplyr::select(question, photo, spider_yn, emmean, SE, df)
+
+
+dt_raw_SpiderVsNonSpider <- data %>% 
+# selects only the dwell time of the first 6 questions
+  dplyr::select(Subject, Gender, PhobiaRank, DT2_Spider, DT2_Butterfly, DT5a_Spider, DT5a_Insect,
+                        DT3b_6eyeSp, DT3b_2eyeIn, DT5c_Spider, DT5c_NonArac,
+                        DT5b_Spider, DT5b_Myriapod, DT11_NonScorp, DT11_Scorpion) %>% 
+  pivot_longer(cols = c(DT2_Spider:DT11_Scorpion), values_to = "dwell_time", names_to = "image") %>% 
+# replace labels to match the associated predictions frame
+  mutate(image = fct_recode(image, "Q1_Spider" = "DT2_Spider",
+                                   "Q1_Butterfly" = "DT2_Butterfly",
+                                   "Q2_Spider" = "DT5a_Spider",
+                                   "Q2_Insect" = "DT5a_Insect",
+                                   "Q3_Spider" = "DT3b_6eyeSp",
+                                   "Q3_Insect.Eyes" = "DT3b_2eyeIn",
+                                   "Q4_Spider" = "DT5c_Spider",
+                                   "Q4_Non.Spider.Arachnid" = "DT5c_NonArac",
+                                   "Q5_Spider" = "DT5b_Spider",
+                                   "Q5_Myriapod" = "DT5b_Myriapod",
+                                   "Q6_Spider" = "DT11_NonScorp",
+                                   "Q6_Scorpion" = "DT11_Scorpion"))
+# fixes the labels as they will appear on the graph
+dt_raw_SpiderVsNonSpider$photo <- factor(dt_raw_SpiderVsNonSpider$image,
+                        levels = c("Q1_Spider", "Q1_Butterfly", 
+                                   "Q2_Spider", "Q2_Insect", 
+                                   "Q3_Spider", "Q3_Insect.Eyes", 
+                                   "Q4_Spider", "Q4_Non.Spider.Arachnid", 
+                                   "Q5_Spider", "Q5_Myriapod", 
+                                   "Q6_Spider", "Q6_Scorpion"),
+                        labels = c("Spider", "Butterfly", 
+                                   "Spider", "Insect", 
+                                   "Spider", "Insect Eyes", 
+                                   "Spider", "Non-Spider Arachnid", 
+                                   "Spider", "Myriapod", 
+                                   "Spider", "Scorpion"))
+dt_raw_SpiderVsNonSpider <- dt_raw_SpiderVsNonSpider %>% 
+# creats a new label for the type of image so we can use it to color the graph
+  mutate(spider_yn = ifelse(photo == "Spider", "Spider", "Non-Spider"),
+         spider_yn = fct_relevel(spider_yn, "Spider", "Non-Spider")) %>% 
+# creates a question column to make the groups in the graph
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+# cleans up with only the columns of interest
+  dplyr::select(Subject, Gender, PhobiaRank, question, photo, spider_yn, dwell_time)
+
+
+# dwell time, with and without features
+dt_predictions_features <- rbind(Q7_image_dt_predictions, 
+                                 Q8_image_dt_predictions, 
+                                 Q9_image_dt_predictions, 
+                                 Q10_image_dt_predictions, 
+                                 Q11_image_dt_predictions, 
+                                 Q12_image_dt_predictions,
+                                 Q13_image_dt_predictions) 
+dt_predictions_features$photo <- factor(dt_predictions_features$image,
+                        levels = c("Q7_Smaller.Eyes", "Q7_Enlarged.Eyes", 
+                                   "Q8_Less.color", "Q8_More.color", 
+                                   "Q9_No.web", "Q9_Web", 
+                                   "Q10_No.eggs", "Q10_Eggs", 
+                                   "Q11_No.fangs", "Q11_Fangs", 
+                                   "Q12_Not.eating", "Q12_Eating",
+                                   "Q13_Not.hairy", "Q13_Hairy"),
+                        labels = c("Smaller Eyes", "Enlarged Eyes", 
+                                   "Less Color", "More Color", 
+                                   "No Web", "Web", 
+                                   "No Eggs", "Eggs",
+                                   "No Fangs", "Fangs", 
+                                   "Not Eating", "Eating", 
+                                   "Not Hairy", "Hairy"))
+dt_predictions_features <- dt_predictions_features %>% 
+  mutate(feature_yn = ifelse(photo == "Smaller Eyes"| photo == "Less Color" | photo == "No Web" | photo == "No Eggs" | photo == "No Fangs" | photo == "Not Eating" | photo == "Not Hairy", "Without Feature", "With Feature"),
+         feature_yn = fct_relevel(feature_yn, "Without Feature", "With Feature")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(question, photo, feature_yn, emmean, SE, df)
+
+dt_raw_features <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, DT3a_6PlusEyes, DT3a_JS, DT4_JSNoCol, DT4_JSCol,
+         DT6_Ground, DT6_Web, DT7_NoEggs, DT7_Eggs, DT9_NoFangs, DT9_Fangs, DT8_NotEating,
+         DT8_Eating, DT10_NotHairy, DT10_Hairy) %>% 
+  pivot_longer(cols = c(DT3a_6PlusEyes:DT10_Hairy), values_to = "dwell_time", names_to = "image") %>% 
+  mutate(image = fct_recode(image, "Q7_Smaller Eyes" = "DT3a_6PlusEyes",
+                                   "Q7_Enlarged Eyes" = "DT3a_JS",
+                                   "Q8_Less color" = "DT4_JSNoCol",
+                                   "Q8_More color" = "DT4_JSCol",
+                                   "Q9_No web" = "DT6_Ground",
+                                   "Q9_Web" = "DT6_Web",
+                                   "Q10_No eggs" = "DT7_NoEggs",
+                                   "Q10_Eggs" = "DT7_Eggs",
+                                   "Q11_No fangs" = "DT9_NoFangs",
+                                   "Q11_Fangs" = "DT9_Fangs",
+                                   "Q12_Not eating" = "DT8_NotEating",
+                                   "Q12_Eating" = "DT8_Eating",
+                                   "Q13_Not hairy" = "DT10_NotHairy",
+                                   "Q13_Hairy" = "DT10_Hairy")) 
+dt_raw_features$photo <- factor(dt_raw_features$image,
+                        levels = c("Q7_Smaller Eyes", "Q7_Enlarged Eyes", 
+                                   "Q8_Less color", "Q8_More color", 
+                                   "Q9_No web", "Q9_Web", 
+                                   "Q10_No eggs", "Q10_Eggs", 
+                                   "Q11_No fangs", "Q11_Fangs", 
+                                   "Q12_Not eating", "Q12_Eating",
+                                   "Q13_Not hairy", "Q13_Hairy"),
+                        labels = c("Smaller Eyes", "Enlarged Eyes", 
+                                   "Less Color", "More Color", 
+                                   "No Web", "Web", 
+                                   "No Eggs", "Eggs",
+                                   "No Fangs", "Fangs", 
+                                   "Not Eating", "Eating", 
+                                   "Not Hairy", "Hairy"))
+dt_raw_features <- dt_raw_features %>% 
+  mutate(feature_yn = ifelse(photo == "Smaller Eyes"| photo == "Less Color" | photo == "No Web" | photo == "No Eggs" | photo == "No Fangs" | photo == "Not Eating" | photo == "Not Hairy", "Without Feature", "With Feature"),
+         feature_yn = fct_relevel(feature_yn, "Without Feature", "With Feature")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, question, photo, feature_yn, dwell_time)
+
+# first run dwell time, spider vs non-spider
+frdt_predictions_SpiderVsNonSpider <- rbind(Q1_image_frdt_predictions, 
+                                          Q2_image_frdt_predictions, 
+                                          Q3_image_frdt_predictions, 
+                                          Q4_image_frdt_predictions, 
+                                          Q5_image_frdt_predictions, 
+                                          Q6_image_frdt_predictions) 
+frdt_predictions_SpiderVsNonSpider$photo <- factor(frdt_predictions_SpiderVsNonSpider$image,
+                        levels = c("Q1_Spider", "Q1_Butterfly", 
+                                   "Q2_Spider", "Q2_Insect", 
+                                   "Q3_Spider", "Q3_Insect.Eyes", 
+                                   "Q4_Spider", "Q4_Non.Spider.Arachnid", 
+                                   "Q5_Spider", "Q5_Myriapod", 
+                                   "Q6_Spider", "Q6_Scorpion"),
+                        labels = c("Spider", "Butterfly", 
+                                   "Spider", "Insect", 
+                                   "Spider", "Insect Eyes", 
+                                   "Spider", "Non-Spider Arachnid", 
+                                   "Spider", "Myriapod", 
+                                   "Spider", "Scorpion"))
+frdt_predictions_SpiderVsNonSpider <- frdt_predictions_SpiderVsNonSpider %>% 
+  mutate(spider_yn = ifelse(photo == "Spider", "Spider", "Non-Spider"),
+         spider_yn = fct_relevel(spider_yn, "Spider", "Non-Spider")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(question, photo, spider_yn, emmean, SE, df)
+
+frdt_raw_SpiderVsNonSpider <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT2_Spider, FRDT2_Butterfly, FRDT5a_Spider, FRDT5a_Insect,
+                        FRDT3b_6eyeSp, FRDT3b_2eyeIn, FRDT5c_Spider, FRDT5c_NonArac,
+                        FRDT5b_Spider, FRDT5b_Myriapod, FRDT11_NonScorp, FRDT11_Scorpion) %>% 
+  pivot_longer(cols = c(FRDT2_Spider:FRDT11_Scorpion), values_to = "first_run_dwell_time", names_to = "image") %>% 
+  mutate(image = fct_recode(image, "Q1_Spider" = "FRDT2_Spider",
+                                   "Q1_Butterfly" = "FRDT2_Butterfly",
+                                   "Q2_Spider" = "FRDT5a_Spider",
+                                   "Q2_Insect" = "FRDT5a_Insect",
+                                   "Q3_Spider" = "FRDT3b_6eyeSp",
+                                   "Q3_Insect.Eyes" = "FRDT3b_2eyeIn",
+                                   "Q4_Spider" = "FRDT5c_Spider",
+                                   "Q4_Non-Spider Arachnid" = "FRDT5c_NonArac",
+                                   "Q5_Spider" = "FRDT5b_Spider",
+                                   "Q5_Myriapod" = "FRDT5b_Myriapod",
+                                   "Q6_Spider" = "FRDT11_NonScorp",
+                                   "Q6_Scorpion" = "FRDT11_Scorpion")) 
+frdt_raw_SpiderVsNonSpider$photo <- factor(frdt_raw_SpiderVsNonSpider$image,
+                        levels = c("Q1_Spider", "Q1_Butterfly", 
+                                   "Q2_Spider", "Q2_Insect", 
+                                   "Q3_Spider", "Q3_Insect.Eyes", 
+                                   "Q4_Spider", "Q4_Non-Spider Arachnid", 
+                                   "Q5_Spider", "Q5_Myriapod", 
+                                   "Q6_Spider", "Q6_Scorpion"),
+                        labels = c("Spider", "Butterfly", 
+                                   "Spider", "Insect", 
+                                   "Spider", "Insect Eyes", 
+                                   "Spider", "Non-Spider Arachnid", 
+                                   "Spider", "Myriapod", 
+                                   "Spider", "Scorpion"))
+frdt_raw_SpiderVsNonSpider <- frdt_raw_SpiderVsNonSpider %>% 
+  mutate(spider_yn = ifelse(photo == "Spider", "Spider", "Non-Spider"),
+         spider_yn = fct_relevel(spider_yn, "Spider", "Non-Spider")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, question, photo, spider_yn, first_run_dwell_time)
+
+# first run dwell time, with and without features
+frdt_predictions_features <- rbind(Q7_image_frdt_predictions, 
+                                 Q8_image_frdt_predictions, 
+                                 Q9_image_frdt_predictions, 
+                                 Q10_image_frdt_predictions, 
+                                 Q11_image_frdt_predictions, 
+                                 Q12_image_frdt_predictions,
+                                 Q13_image_frdt_predictions) 
+frdt_predictions_features$photo <- factor(frdt_predictions_features$image,
+                        levels = c("Q7_Smaller.Eyes", "Q7_Enlarged.Eyes", 
+                                   "Q8_Less.color", "Q8_More.color", 
+                                   "Q9_No.web", "Q9_Web", 
+                                   "Q10_No.eggs", "Q10_Eggs", 
+                                   "Q11_No.fangs", "Q11_Fangs", 
+                                   "Q12_Not.eating", "Q12_Eating",
+                                   "Q13_Not.hairy", "Q13_Hairy"),
+                        labels = c("Smaller Eyes", "Enlarged Eyes", 
+                                   "Less Color", "More Color", 
+                                   "No Web", "Web", 
+                                   "No Eggs", "Eggs",
+                                   "No Fangs", "Fangs", 
+                                   "Not Eating", "Eating", 
+                                   "Not Hairy", "Hairy"))
+frdt_predictions_features <- frdt_predictions_features %>% 
+  mutate(feature_yn = ifelse(photo == "Smaller Eyes"| photo == "Less Color" | photo == "No Web" | photo == "No Eggs" | photo == "No Fangs" | photo == "Not Eating" | photo == "Not Hairy", "Without Feature", "With Feature"),
+         feature_yn = fct_relevel(feature_yn, "Without Feature", "With Feature")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(question, photo, feature_yn, emmean, SE, df)
+
+frdt_raw_features <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FRDT3a_6PlusEyes, FRDT3a_JS, FRDT4_JSNoCol, FRDT4_JSCol,
+         FRDT6_Ground, FRDT6_Web, FRDT7_NoEggs, FRDT7_Eggs, FRDT9_NoFangs, FRDT9_Fangs, FRDT8_NotEating,
+         FRDT8_Eating, FRDT10_NotHairy, FRDT10_Hairy) %>% 
+  pivot_longer(cols = c(FRDT3a_6PlusEyes:FRDT10_Hairy), values_to = "first_run_dwell_time", names_to = "image") %>% 
+  mutate(image = fct_recode(image, "Q7_Smaller Eyes" = "FRDT3a_6PlusEyes",
+                                   "Q7_Enlarged Eyes" = "FRDT3a_JS",
+                                   "Q8_Less color" = "FRDT4_JSNoCol",
+                                   "Q8_More color" = "FRDT4_JSCol",
+                                   "Q9_No web" = "FRDT6_Ground",
+                                   "Q9_Web" = "FRDT6_Web",
+                                   "Q10_No eggs" = "FRDT7_NoEggs",
+                                   "Q10_Eggs" = "FRDT7_Eggs",
+                                   "Q11_No fangs" = "FRDT9_NoFangs",
+                                   "Q11_Fangs" = "FRDT9_Fangs",
+                                   "Q12_Not eating" = "FRDT8_NotEating",
+                                   "Q12_Eating" = "FRDT8_Eating",
+                                   "Q13_Not hairy" = "FRDT10_NotHairy",
+                                   "Q13_Hairy" = "FRDT10_Hairy")) 
+frdt_raw_features$photo <- factor(frdt_raw_features$image,
+                        levels = c("Q7_Smaller Eyes", "Q7_Enlarged Eyes", 
+                                   "Q8_Less color", "Q8_More color", 
+                                   "Q9_No web", "Q9_Web", 
+                                   "Q10_No eggs", "Q10_Eggs", 
+                                   "Q11_No fangs", "Q11_Fangs", 
+                                   "Q12_Not eating", "Q12_Eating",
+                                   "Q13_Not hairy", "Q13_Hairy"),
+                        labels = c("Smaller Eyes", "Enlarged Eyes", 
+                                   "Less Color", "More Color", 
+                                   "No Web", "Web", 
+                                   "No Eggs", "Eggs",
+                                   "No Fangs", "Fangs", 
+                                   "Not Eating", "Eating", 
+                                   "Not Hairy", "Hairy"))
+frdt_raw_features <- frdt_raw_features %>% 
+  mutate(feature_yn = ifelse(photo == "Smaller Eyes"| photo == "Less Color" | photo == "No Web" | photo == "No Eggs" | photo == "No Fangs" | photo == "Not Eating" | photo == "Not Hairy", "Without Feature", "With Feature"),
+         feature_yn = fct_relevel(feature_yn, "Without Feature", "With Feature")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, question, photo, feature_yn, first_run_dwell_time)
+
+# first fixation time, spider vs non-spider
+fft_predictions_SpiderVsNonSpider <- rbind(Q1_image_fft_predictions, 
+                                          Q2_image_fft_predictions, 
+                                          Q3_image_fft_predictions, 
+                                          Q4_image_fft_predictions, 
+                                          Q5_image_fft_predictions, 
+                                          Q6_image_fft_predictions) 
+fft_predictions_SpiderVsNonSpider$photo <- factor(fft_predictions_SpiderVsNonSpider$image,
+                        levels = c("Q1_Spider", "Q1_Butterfly", 
+                                   "Q2_Spider", "Q2_Insect", 
+                                   "Q3_Spider", "Q3_Insect.Eyes", 
+                                   "Q4_Spider", "Q4_Non.Spider.Arachnid", 
+                                   "Q5_Spider", "Q5_Myriapod", 
+                                   "Q6_Spider", "Q6_Scorpion"),
+                        labels = c("Spider", "Butterfly", 
+                                   "Spider", "Insect", 
+                                   "Spider", "Insect Eyes", 
+                                   "Spider", "Non-Spider Arachnid", 
+                                   "Spider", "Myriapod", 
+                                   "Spider", "Scorpion"))
+fft_predictions_SpiderVsNonSpider <- fft_predictions_SpiderVsNonSpider %>% 
+  mutate(spider_yn = ifelse(photo == "Spider", "Spider", "Non-Spider"),
+         spider_yn = fct_relevel(spider_yn, "Spider", "Non-Spider")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(question, photo, spider_yn, emmean, SE, df)
+
+fft_raw_SpiderVsNonSpider <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT2_Spider, FFT2_Butterfly, FFT5a_Spider, FFT5a_Insect,
+                        FFT3b_6eyeSp, FFT3b_2eyeIn, FFT5c_Spider, FFT5c_NonArac,
+                        FFT5b_Spider, FFT5b_Myriapod, FFT11_Non.Scorp, FFT11_Scorpion) %>% 
+  pivot_longer(cols = c(FFT2_Spider:FFT11_Scorpion), values_to = "first_fixation_time", names_to = "image") %>% 
+  mutate(image = fct_recode(image, "Q1_Spider" = "FFT2_Spider",
+                                   "Q1_Butterfly" = "FFT2_Butterfly",
+                                   "Q2_Spider" = "FFT5a_Spider",
+                                   "Q2_Insect" = "FFT5a_Insect",
+                                   "Q3_Spider" = "FFT3b_6eyeSp",
+                                   "Q3_Insect.Eyes" = "FFT3b_2eyeIn",
+                                   "Q4_Spider" = "FFT5c_Spider",
+                                   "Q4_Non.Spider.Arachnid" = "FFT5c_NonArac",
+                                   "Q5_Spider" = "FFT5b_Spider",
+                                   "Q5_Myriapod" = "FFT5b_Myriapod",
+                                   "Q6_Spider" = "FFT11_Non.Scorp",
+                                   "Q6_Scorpion" = "FFT11_Scorpion")) 
+fft_raw_SpiderVsNonSpider$photo <- factor(fft_raw_SpiderVsNonSpider$image,
+                        levels = c("Q1_Spider", "Q1_Butterfly", 
+                                   "Q2_Spider", "Q2_Insect", 
+                                   "Q3_Spider", "Q3_Insect.Eyes", 
+                                   "Q4_Spider", "Q4_Non.Spider.Arachnid", 
+                                   "Q5_Spider", "Q5_Myriapod", 
+                                   "Q6_Spider", "Q6_Scorpion"),
+                        labels = c("Spider", "Butterfly", 
+                                   "Spider", "Insect", 
+                                   "Spider", "Insect Eyes", 
+                                   "Spider", "Non-Spider Arachnid", 
+                                   "Spider", "Myriapod", 
+                                   "Spider", "Scorpion"))
+fft_raw_SpiderVsNonSpider <- fft_raw_SpiderVsNonSpider %>% 
+  mutate(spider_yn = ifelse(photo == "Spider", "Spider", "Non-Spider"),
+         spider_yn = fct_relevel(spider_yn, "Spider", "Non-Spider")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, question, photo, spider_yn, first_fixation_time)
+
+# first fixation time, with and without features
+fft_predictions_features <- rbind(Q7_image_fft_predictions, 
+                                 Q8_image_fft_predictions, 
+                                 Q9_image_fft_predictions, 
+                                 Q10_image_fft_predictions, 
+                                 Q11_image_fft_predictions, 
+                                 Q12_image_fft_predictions,
+                                 Q13_image_fft_predictions)
+fft_predictions_features$photo <- factor(fft_predictions_features$image,
+                        levels = c("Q7_Smaller.Eyes", "Q7_Enlarged.Eyes", 
+                                   "Q8_Less.color", "Q8_More.color", 
+                                   "Q9_No.web", "Q9_Web", 
+                                   "Q10_No.eggs", "Q10_Eggs", 
+                                   "Q11_No.fangs", "Q11_Fangs", 
+                                   "Q12_Not.eating", "Q12_Eating",
+                                   "Q13_Not.hairy", "Q13_Hairy"),
+                        labels = c("Smaller Eyes", "Enlarged Eyes", 
+                                   "Less Color", "More Color", 
+                                   "No Web", "Web", 
+                                   "No Eggs", "Eggs",
+                                   "No Fangs", "Fangs", 
+                                   "Not Eating", "Eating", 
+                                   "Not Hairy", "Hairy"))
+fft_predictions_features <- fft_predictions_features %>% 
+  mutate(feature_yn = ifelse(photo == "Smaller Eyes"| photo == "Less Color" | photo == "No Web" | photo == "No Eggs" | photo == "No Fangs" | photo == "Not Eating" | photo == "Not Hairy", "Without Feature", "With Feature"),
+         feature_yn = fct_relevel(feature_yn, "Without Feature", "With Feature")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(question, photo, feature_yn, emmean, SE, df)
+
+fft_raw_features <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, FFT3a_6PlusEyes, FFT3a_JS, FFT4_JSNoCol, FFT4_JSCol,
+         FFT6_Ground, FFT6_Web, FFT7_NoEggs, FFT7_Eggs, FFT9_NoFangs, FFT9_Fangs, FFT8_NotEating,
+         FFT8_Eating, FFT10_NotHairy, FFT10_Hairy) %>% 
+  pivot_longer(cols = c(FFT3a_6PlusEyes:FFT10_Hairy), values_to = "first_fixation_time", names_to = "image") %>% 
+  mutate(image = fct_recode(image, "Q7_Smaller Eyes" = "FFT3a_6PlusEyes",
+                                   "Q7_Enlarged Eyes" = "FFT3a_JS",
+                                   "Q8_Less color" = "FFT4_JSNoCol",
+                                   "Q8_More color" = "FFT4_JSCol",
+                                   "Q9_No web" = "FFT6_Ground",
+                                   "Q9_Web" = "FFT6_Web",
+                                   "Q10_No eggs" = "FFT7_NoEggs",
+                                   "Q10_Eggs" = "FFT7_Eggs",
+                                   "Q11_No fangs" = "FFT9_NoFangs",
+                                   "Q11_Fangs" = "FFT9_Fangs",
+                                   "Q12_Not eating" = "FFT8_NotEating",
+                                   "Q12_Eating" = "FFT8_Eating",
+                                   "Q13_Not hairy" = "FFT10_NotHairy",
+                                   "Q13_Hairy" = "FFT10_Hairy")) 
+fft_raw_features$photo <- factor(fft_raw_features$image,
+                        levels = c("Q7_Smaller Eyes", "Q7_Enlarged Eyes", 
+                                   "Q8_Less color", "Q8_More color", 
+                                   "Q9_No web", "Q9_Web", 
+                                   "Q10_No eggs", "Q10_Eggs", 
+                                   "Q11_No fangs", "Q11_Fangs", 
+                                   "Q12_Not eating", "Q12_Eating",
+                                   "Q13_Not hairy", "Q13_Hairy"),
+                        labels = c("Smaller Eyes", "Enlarged Eyes", 
+                                   "Less Color", "More Color", 
+                                   "No Web", "Web", 
+                                   "No Eggs", "Eggs",
+                                   "No Fangs", "Fangs", 
+                                   "Not Eating", "Eating", 
+                                   "Not Hairy", "Hairy"))
+fft_raw_features <- fft_raw_features %>% 
+  mutate(feature_yn = ifelse(photo == "Smaller Eyes"| photo == "Less Color" | photo == "No Web" | photo == "No Eggs" | photo == "No Fangs" | photo == "Not Eating" | photo == "Not Hairy", "Without Feature", "With Feature"),
+         feature_yn = fct_relevel(feature_yn, "Without Feature", "With Feature")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, question, photo, feature_yn, first_fixation_time)
+
+# run count, spider vs non-spider
+rc_predictions_SpiderVsNonSpider <- rbind(Q1_image_rc_predictions, 
+                                          Q2_image_rc_predictions, 
+                                          Q3_image_rc_predictions, 
+                                          Q4_image_rc_predictions, 
+                                          Q5_image_rc_predictions, 
+                                          Q6_image_rc_predictions) 
+rc_predictions_SpiderVsNonSpider$photo <- factor(rc_predictions_SpiderVsNonSpider$image,
+                        levels = c("Q1_Spider", "Q1_Butterfly", 
+                                   "Q2_Spider", "Q2_Insect", 
+                                   "Q3_Spider", "Q3_Insect.Eyes", 
+                                   "Q4_Spider", "Q4_Non.Spider.Arachnid", 
+                                   "Q5_Spider", "Q5_Myriapod", 
+                                   "Q6_Spider", "Q6_Scorpion"),
+                        labels = c("Spider", "Butterfly", 
+                                   "Spider", "Insect", 
+                                   "Spider", "Insect Eyes", 
+                                   "Spider", "Non-Spider Arachnid", 
+                                   "Spider", "Myriapod", 
+                                   "Spider", "Scorpion"))
+rc_predictions_SpiderVsNonSpider <- rc_predictions_SpiderVsNonSpider %>% 
+  mutate(spider_yn = ifelse(photo == "Spider", "Spider", "Non-Spider"),
+         spider_yn = fct_relevel(spider_yn, "Spider", "Non-Spider")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(question, photo, spider_yn, emmean, SE, df)
+
+rc_raw_SpiderVsNonSpider <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC2_Spider, RC2_Butterfly, RC5a_Spider, RC5a_Insect,
+                        RC3b_6eyeSp, RC3b_2eyeIn, RC5c_Spider, RC5c_NonArac,
+                        RC5b_Spider, RC5b_Myriapod, RC11_NonScorp, RC11_Scorpion) %>% 
+  pivot_longer(cols = c(RC2_Spider:RC11_Scorpion), values_to = "run_count", names_to = "image") %>% 
+  mutate(image = fct_recode(image, "Q1_Spider" = "RC2_Spider",
+                                   "Q1_Butterfly" = "RC2_Butterfly",
+                                   "Q2_Spider" = "RC5a_Spider",
+                                   "Q2_Insect" = "RC5a_Insect",
+                                   "Q3_Spider" = "RC3b_6eyeSp",
+                                   "Q3_Insect.Eyes" = "RC3b_2eyeIn",
+                                   "Q4_Spider" = "RC5c_Spider",
+                                   "Q4_Non.Spider.Arachnid" = "RC5c_NonArac",
+                                   "Q5_Spider" = "RC5b_Spider",
+                                   "Q5_Myriapod" = "RC5b_Myriapod",
+                                   "Q6_Spider" = "RC11_NonScorp",
+                                   "Q6_Scorpion" = "RC11_Scorpion")) 
+rc_raw_SpiderVsNonSpider$photo <- factor(rc_raw_SpiderVsNonSpider$image,
+                        levels = c("Q1_Spider", "Q1_Butterfly", 
+                                   "Q2_Spider", "Q2_Insect", 
+                                   "Q3_Spider", "Q3_Insect.Eyes", 
+                                   "Q4_Spider", "Q4_Non.Spider.Arachnid", 
+                                   "Q5_Spider", "Q5_Myriapod", 
+                                   "Q6_Spider", "Q6_Scorpion"),
+                        labels = c("Spider", "Butterfly", 
+                                   "Spider", "Insect", 
+                                   "Spider", "Insect Eyes", 
+                                   "Spider", "Non-Spider Arachnid", 
+                                   "Spider", "Myriapod", 
+                                   "Spider", "Scorpion"))
+rc_raw_SpiderVsNonSpider <- rc_raw_SpiderVsNonSpider %>% 
+  mutate(spider_yn = ifelse(photo == "Spider", "Spider", "Non-Spider"),
+         spider_yn = fct_relevel(spider_yn, "Spider", "Non-Spider")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, question, photo, spider_yn, run_count)
+
+# run count, with and without features
+rc_predictions_features <- rbind(Q7_image_rc_predictions, 
+                                 Q8_image_rc_predictions, 
+                                 Q9_image_rc_predictions, 
+                                 Q10_image_rc_predictions, 
+                                 Q11_image_rc_predictions, 
+                                 Q12_image_rc_predictions,
+                                 Q13_image_rc_predictions) 
+rc_predictions_features$photo <- factor(rc_predictions_features$image,
+                        levels = c("Q7_Smaller.Eyes", "Q7_Enlarged.Eyes", 
+                                   "Q8_Less.color", "Q8_More.color", 
+                                   "Q9_No.web", "Q9_Web", 
+                                   "Q10_No.eggs", "Q10_Eggs", 
+                                   "Q11_No.fangs", "Q11_Fangs", 
+                                   "Q12_Not.eating", "Q12_Eating",
+                                   "Q13_Not.hairy", "Q13_Hairy"),
+                        labels = c("Smaller Eyes", "Enlarged Eyes", 
+                                   "Less Color", "More Color", 
+                                   "No Web", "Web", 
+                                   "No Eggs", "Eggs",
+                                   "No Fangs", "Fangs", 
+                                   "Not Eating", "Eating", 
+                                   "Not Hairy", "Hairy"))
+rc_predictions_features <- rc_predictions_features %>% 
+  mutate(feature_yn = ifelse(photo == "Smaller Eyes"| photo == "Less Color" | photo == "No Web" | photo == "No Eggs" | photo == "No Fangs" | photo == "Not Eating" | photo == "Not Hairy", "Without Feature", "With Feature"),
+         feature_yn = fct_relevel(feature_yn, "Without Feature", "With Feature")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(question, photo, feature_yn, emmean, SE, df)
+
+rc_raw_features <- data %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, RC3a_6PlusEyes, RC3a_JS, RC4_JSNoCol, RC4_JSCol,
+         RC6_Ground, RC6_Web, RC7_NoEggs, RC7_Eggs, RC9_NoFangs, RC9_Fangs, RC8_NotEating,
+         RC8_Eating, RC10_NotHairy, RC10_Hairy) %>% 
+  pivot_longer(cols = c(RC3a_6PlusEyes:RC10_Hairy), values_to = "run_count", names_to = "image") %>% 
+  mutate(image = fct_recode(image, "Q7_Smaller Eyes" = "RC3a_6PlusEyes",
+                                   "Q7_Enlarged Eyes" = "RC3a_JS",
+                                   "Q8_Less color" = "RC4_JSNoCol",
+                                   "Q8_More color" = "RC4_JSCol",
+                                   "Q9_No web" = "RC6_Ground",
+                                   "Q9_Web" = "RC6_Web",
+                                   "Q10_No eggs" = "RC7_NoEggs",
+                                   "Q10_Eggs" = "RC7_Eggs",
+                                   "Q11_No fangs" = "RC9_NoFangs",
+                                   "Q11_Fangs" = "RC9_Fangs",
+                                   "Q12_Not eating" = "RC8_NotEating",
+                                   "Q12_Eating" = "RC8_Eating",
+                                   "Q13_Not hairy" = "RC10_NotHairy",
+                                   "Q13_Hairy" = "RC10_Hairy"))
+rc_raw_features$photo <- factor(rc_raw_features$image,
+                        levels = c("Q7_Smaller Eyes", "Q7_Enlarged Eyes", 
+                                   "Q8_Less color", "Q8_More color", 
+                                   "Q9_No web", "Q9_Web", 
+                                   "Q10_No eggs", "Q10_Eggs", 
+                                   "Q11_No fangs", "Q11_Fangs", 
+                                   "Q12_Not eating", "Q12_Eating",
+                                   "Q13_Not hairy", "Q13_Hairy"),
+                        labels = c("Smaller Eyes", "Enlarged Eyes", 
+                                   "Less Color", "More Color", 
+                                   "No Web", "Web", 
+                                   "No Eggs", "Eggs",
+                                   "No Fangs", "Fangs", 
+                                   "Not Eating", "Eating", 
+                                   "Not Hairy", "Hairy"))
+rc_raw_features <- rc_raw_features %>% 
+  mutate(feature_yn = ifelse(photo == "Smaller Eyes"| photo == "Less Color" | photo == "No Web" | photo == "No Eggs" | photo == "No Fangs" | photo == "Not Eating" | photo == "Not Hairy", "Without Feature", "With Feature"),
+         feature_yn = fct_relevel(feature_yn, "Without Feature", "With Feature")) %>% 
+  separate(image, c("question", "other"), remove = FALSE, sep = "_") %>% 
+  dplyr::select(Subject, Gender, PhobiaRank, question, photo, feature_yn, run_count)
+
+# wrangling for other figures
+arachnid <- arachnid %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_relevel(photo, "Spider", "Non-Spider Arachnid"))
+
+butterfly <- butterfly %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = factor(photo),
+         photo = fct_relevel(photo, "Spider", "Butterfly"))
+
+myriapod <- myriapod %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_relevel(photo, "Spider", "Myriapod"))
+
+scorpion <- scorpion %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_relevel(photo, "Spider", "Scorpion"))
+
+color <- color %>% 
+  separate(image, c("question", "photo"), sep = "_") %>% 
+  mutate(photo = fct_relevel(photo, "Less color", "More color"))
+
+```
+
+For Emma: Let's make some graphs - woohoo!! Just make sure you run all of the lines above before graphing and checkout how the dataframes are set up.
+
+```{r figure of image differences}
+# this is the figure with 8 panels we talked about: one for each of the four variables and splitting the questions into spider/non-spider and with/without feature
+
+# 1. Add code for ggplot of spider vs non-spider dwell time here
+# raw: dt_raw_SpiderVsNonSpider (jittered points)
+# predictions: dt_predictions_SpiderVsNonSpider (point and errorbars = emmean +/- SE)
+
+dt_spider <- ggplot() +
+# each layer here adds a new element to the graph
+  geom_jitter(aes(x = photo, y = dwell_time, color = spider_yn), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = dt_raw_SpiderVsNonSpider) +
+  geom_point(aes(x = photo, y = emmean, color = spider_yn), # the predicted mean
+             size = 1.5,
+             data = dt_predictions_SpiderVsNonSpider) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = spider_yn), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = dt_predictions_SpiderVsNonSpider) +
+# this layer creates the spacing between each question on the graph
+  facet_wrap(~question, strip.position = "bottom", scales = "free_x", 
+             nrow = 1, ncol = 6) +
+# the rest of the layers edit the appearance of the graph
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.text.x = element_blank()) # removes the labels created by facet_wrap
+  
+
+# 2. Add code for ggplot of with and without features dwell time here
+# raw: dt_raw_features (jittered points)
+# predictions: dt_predictions_features (point and errorbars = emmean +/- SE)
+dt_feature <- ggplot() +
+  geom_jitter(aes(x = photo, y = dwell_time, color = feature_yn), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = dt_raw_features) +
+  geom_point(aes(x = photo, y = emmean, color = feature_yn), # the predicted mean
+             size = 1.5,
+             data = dt_predictions_features) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = feature_yn), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = dt_predictions_features) +
+  facet_wrap(~question, strip.position = "bottom", scales = "free_x", 
+             nrow = 1, ncol = 7) +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.text.x = element_blank()) # removes the labels created by facet_wrap
+
+# 3. Add code for ggplot of spider vs non-spider first run dwell time here
+# raw: frdt_raw_SpiderVsNonSpider (jittered points)
+# predictions: frdt_predictions_SpiderVsNonSpider (point and errorbars = emmean +/- SE)
+frdt_spider <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_run_dwell_time, color = spider_yn), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = frdt_raw_SpiderVsNonSpider) +
+  geom_point(aes(x = photo, y = emmean, color = spider_yn), # the predicted mean
+             size = 1.5,
+             data = frdt_predictions_SpiderVsNonSpider) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = spider_yn), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = frdt_predictions_SpiderVsNonSpider) +
+# this layer creates the spacing between each question on the graph
+  facet_wrap(~question, strip.position = "bottom", scales = "free_x", 
+             nrow = 1, ncol = 6) +
+# the rest of the layers edit the appearance of the graph
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Run Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.text.x = element_blank()) # removes the labels created by facet_wrap
+
+# 4. Add code for ggplot of with and without features first run dwell time here
+# raw: frdt_raw_features (jittered points)
+# predictions: frdt_predictions_features (point and errorbars = emmean +/- SE)
+frdt_feature <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_run_dwell_time, color = feature_yn), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = frdt_raw_features) +
+  geom_point(aes(x = photo, y = emmean, color = feature_yn), # the predicted mean
+             size = 1.5,
+             data = frdt_predictions_features) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = feature_yn), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = frdt_predictions_features) +
+  facet_wrap(~question, strip.position = "bottom", scales = "free_x", 
+             nrow = 1, ncol = 7) +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Run Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.text.x = element_blank()) # removes the labels created by facet_wrap
+
+# 5. Add code for ggplot of spider vs non-spider first fixation time here
+# raw: fft_raw_SpiderVsNonSpider (jittered points)
+# predictions: fft_predictions_SpiderVsNonSpider (point and errorbars = emmean +/- SE)
+fft_spider <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_fixation_time, color = spider_yn), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = fft_raw_SpiderVsNonSpider) +
+  geom_point(aes(x = photo, y = emmean, color = spider_yn), # the predicted mean
+             size = 1.5,
+             data = fft_predictions_SpiderVsNonSpider) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = spider_yn), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = fft_predictions_SpiderVsNonSpider) +
+# this layer creates the spacing between each question on the graph
+  facet_wrap(~question, strip.position = "bottom", scales = "free_x", 
+             nrow = 1, ncol = 6) +
+# the rest of the layers edit the appearance of the graph
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Fixation Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.text.x = element_blank()) # removes the labels created by facet_wrap
+
+# 6. Add code for ggplot of with and without features first fixation time here
+# raw: fft_raw_features (jittered points)
+# predictions: fft_predictions_features (point and errorbars = emmean +/- SE)
+fft_feature <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_fixation_time, color = feature_yn), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = fft_raw_features) +
+  geom_point(aes(x = photo, y = emmean, color = feature_yn), # the predicted mean
+             size = 1.5,
+             data = fft_predictions_features) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = feature_yn), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = fft_predictions_features) +
+  facet_wrap(~question, strip.position = "bottom", scales = "free_x", 
+             nrow = 1, ncol = 7) +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Fixation Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.text.x = element_blank()) # removes the labels created by facet_wrap
+
+# 7. Add code for ggplot of spider vs non-spider run count here
+# raw: rc_raw_SpiderVsNonSpider (jittered points)
+# predictions: rc_predictions_SpiderVsNonSpider (point and errorbars = emmean +/- SE)
+rc_spider <- ggplot() +
+  geom_jitter(aes(x = photo, y = run_count, color = spider_yn), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = rc_raw_SpiderVsNonSpider) +
+  geom_point(aes(x = photo, y = emmean, color = spider_yn), # the predicted mean
+             size = 1.5,
+             data = rc_predictions_SpiderVsNonSpider) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = spider_yn), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = rc_predictions_SpiderVsNonSpider) +
+# this layer creates the spacing between each question on the graph
+  facet_wrap(~question, strip.position = "bottom", scales = "free_x", 
+             nrow = 1, ncol = 6) +
+# the rest of the layers edit the appearance of the graph
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("Run Count") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.text.x = element_blank()) # removes the labels created by facet_wrap
+
+# 8. Add code for ggplot of with and without features run count here
+# raw: rc_raw_features (jittered points)
+# predictions: rc_predictions_features (point and errorbars = emmean +/- SE)
+rc_feature <- ggplot() +
+  geom_jitter(aes(x = photo, y = run_count, color = feature_yn), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = rc_raw_features) +
+  geom_point(aes(x = photo, y = emmean, color = feature_yn), # the predicted mean
+             size = 1.5,
+             data = rc_predictions_features) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = feature_yn), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = rc_predictions_features) +
+  facet_wrap(~question, strip.position = "bottom", scales = "free_x", 
+             nrow = 1, ncol = 7) +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("Run Count") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.text.x = element_blank()) # removes the labels created by facet_wrap
+
+ggarrange(dt_spider, frdt_spider, fft_spider, rc_spider, 
+          dt_feature, frdt_feature, fft_feature, rc_feature,
+          nrow = 2,
+          ncol = 4)
+ggsave(here("figures_tables/image_diffs.png"), width = 8, height = 6, scale = 2)
+```
+
+```{r figure of spider vs non-spider arachnid}
+# this is the figure about spider vs non-spider arachnids that had a bunch of three way interactions (there wasn't a three-way interaction for run count so I left that out)
+
+# dwell time
+# predictions: Q4_igp_dt_predictions
+# raw data: arachnid
+dt_arachnid <- ggplot() +
+  geom_jitter(aes(x = photo, y = dwell_time, color = Gender), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = arachnid) +
+  geom_point(aes(x = photo, y = emmean, color = Gender), # the predicted mean
+             size = 1.5,
+             data = Q4_igp_dt_predictions) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = Gender), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = Q4_igp_dt_predictions) +
+  facet_wrap(~factor(PhobiaRank, c("Low", "Medium", "High")), strip.position = "bottom", scales = "free_x") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  labs(y = "Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.background = element_rect(color = "#FFFFFF"))
+
+# first run dwell time
+# predictions: Q4_igp_frdt_predictions
+# raw data: arachnid
+frdt_arachnid <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_run_dwell_time, color = Gender), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = arachnid) +
+  geom_point(aes(x = photo, y = emmean, color = Gender), # the predicted mean
+             size = 1.5,
+             data = Q4_igp_frdt_predictions) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = Gender), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = Q4_igp_frdt_predictions) +
+  facet_wrap(~factor(PhobiaRank, c("Low", "Medium", "High")), strip.position = "bottom", scales = "free_x") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Run Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.background = element_rect(color = "#FFFFFF"))
+
+# first fixation time
+# predictions: Q4_igp_fft_predictions
+# raw data: arachnid
+fft_arachnid <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_fixation_time, color = Gender), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = arachnid) +
+  geom_point(aes(x = photo, y = emmean, color = Gender), # the predicted mean
+             size = 1.5,
+             data = Q4_igp_fft_predictions) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = Gender), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = Q4_igp_fft_predictions) +
+  facet_wrap(~factor(PhobiaRank, c("Low", "Medium", "High")), strip.position = "bottom", scales = "free_x") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Fixation Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12),
+        strip.background = element_rect(color = "#FFFFFF"))
+
+
+ggarrange(dt_arachnid, frdt_arachnid, fft_arachnid,
+          nrow = 1, common.legend = TRUE, legend="top")
+ggsave(here("figures_tables/spider_vs_arachnid.png"), width = 8, height = 5, scale = 1)
+```
+
+```{r figure of gender differences, echo=TRUE}
+# this is the figure showing all of the graphs for image x gender interactions
+
+# spider vs butterfly, dwell time
+# predictions: Q1_ig_dt_predictions
+# raw data: butterfly
+gender_butterfly <- ggplot() +
+  geom_jitter(aes(x = photo, y = dwell_time, color = Gender), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = butterfly) +
+  geom_point(aes(x = photo, y = emmean, color = Gender), # the predicted mean
+             size = 1.5,
+             data = Q1_ig_dt_predictions) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = Gender), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = Q1_ig_dt_predictions) +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12))
+
+# spider vs myriapod, first run dwell time
+# predictions: Q5_ig_frdt_predictions
+# raw data: myriapod
+gender_myriapod <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_run_dwell_time, color = Gender), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = myriapod) +
+  geom_point(aes(x = photo, y = emmean, color = Gender), # the predicted mean
+             size = 1.5,
+             data = Q5_ig_frdt_predictions) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = Gender), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = Q5_ig_frdt_predictions) +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Run Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12))
+
+# scorpion vs non-scorpion, first run dwell time
+# predictions: Q6_ig_frdt_predictions
+# raw data: scorpion
+gender_scorpion <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_run_dwell_time, color = Gender), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = scorpion) +
+  geom_point(aes(x = photo, y = emmean, color = Gender), # the predicted mean
+             size = 1.5,
+             data = Q6_ig_frdt_predictions) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = Gender), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = Q6_ig_frdt_predictions) +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Run Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12))
+
+ggarrange(gender_butterfly, gender_myriapod, gender_scorpion,
+          nrow = 1, common.legend = TRUE, legend="top")
+ggsave(here("figures_tables/imagexgender.png"), width = 8, height = 5, scale = 1)
+```
+
+```{r figure of phobia differences}
+# this is the figure showing all of the graphs for image x PhobiaRank interactions
+
+# scorpion vs non-scorpion, dwell time
+# predictions: Q6_ip_dt_predictions
+# raw data: scorpion
+phobia_order <- c("Low", "Medium", "High")
+
+scorpion <- scorpion %>% 
+  mutate(PhobiaRank = factor(PhobiaRank),
+         PhobiaRank = fct_relevel(PhobiaRank, "Low", "Medium", "High"))
+Q6_ip_dt_predictions <- Q6_ip_dt_predictions %>% 
+  mutate(PhobiaRank = factor(PhobiaRank),
+         PhobiaRank = fct_relevel(PhobiaRank, "Low", "Medium", "High"))
+
+phobia_scorpion_dt <- ggplot() +
+  geom_jitter(aes(x = photo, y = dwell_time, color = PhobiaRank), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = scorpion) +
+  geom_point(aes(x = photo, y = emmean, color = PhobiaRank), # the predicted mean
+             size = 1.5,
+             data = Q6_ip_dt_predictions) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = PhobiaRank), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = Q6_ip_dt_predictions) +
+  #scale_x_discrete(limits = phobia_order) +
+  scale_color_manual(values = c("#d95f02", "#7570b3", "#02a649")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12))
+
+
+# scorpion vs non-scorpion, first run dwell time
+# predictions: Q6_ip_frdt_predictions
+# raw data: scorpion
+phobia_scorpion_frdt <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_run_dwell_time, color = PhobiaRank), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = scorpion) +
+  geom_point(aes(x = photo, y = emmean, color = PhobiaRank), # the predicted mean
+             size = 1.5,
+             data = Q6_ip_frdt_predictions) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = PhobiaRank), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = Q6_ip_frdt_predictions) +
+  #scale_x_discrete(limits = phobia_order) +
+  scale_color_manual("", values = c("#d95f02", "#7570b3", "#02a649")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Run Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12))
+
+
+# scorpion vs non-scorpion, first fixation time
+# predictions: Q6_ip_fft_predictions
+# raw data: scorpion
+phobia_scorpion_fft <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_fixation_time, color = PhobiaRank), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = scorpion) +
+  geom_point(aes(x = photo, y = emmean, color = PhobiaRank), # the predicted mean
+             size = 1.5,
+             data = Q6_ip_fft_predictions) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = PhobiaRank), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = Q6_ip_fft_predictions) +
+  #scale_x_discrete(limits = phobia_order) +
+  scale_color_manual("", values = c("#d95f02", "#7570b3", "#02a649")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Fixation Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12))
+  
+
+# more color vs less color jumping spider, first run dwell time
+# predictions: Q8_ip_frdt_predictions
+# raw data: color
+phobia_colorful_frdt <- ggplot() +
+  geom_jitter(aes(x = photo, y = first_run_dwell_time, color = PhobiaRank), # the raw data layer
+              alpha = 0.1, width = 0.25, size = 1,
+              data = color) +
+  geom_point(aes(x = photo, y = emmean, color = PhobiaRank), # the predicted mean
+             size = 1.5,
+             data = Q8_ip_frdt_predictions) +
+  geom_errorbar(aes(x = photo, ymax = emmean + SE, ymin = emmean - SE, 
+                    color = PhobiaRank), # the predicted standard error 
+                width = 0.5, linewidth = 0.75,
+                data = Q8_ip_frdt_predictions) +
+  #scale_x_discrete(limits = phobia_order) +
+  scale_color_manual("", values = c("#d95f02", "#7570b3", "#02a649")) + # set colors
+  xlab("") + # x axis label, I left it blank
+  ylab("First Run Dwell Time (ms)") + # y axis label
+  theme_classic() + # removes the default background/gridlines
+  theme(legend.position = "top", # moves legend to the top
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, # rotates x-axis text
+                                   color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10), # sets font size/color
+        axis.title.y = element_text(color = "black", size = 12))
+
+ggarrange(phobia_scorpion_dt, phobia_scorpion_frdt, phobia_scorpion_fft, phobia_colorful_frdt,
+          nrow = 1, ncolumn = 4, common.legend = TRUE, legend="top")
+ggsave(here("figures_tables/imagexphobia.png"), width = 8, height = 6, scale = 1)
+```
+
+Rather than making some more complex models (like I did below), let's just graph and look for variation.
+
+```{r raw wrangling}
+subjects = as.character(data$Subject)
+rm_df2 <- rm_df %>% 
+  mutate(Subject = RECORDING_SESSION_LABEL, 
+         Subject = na_if(Subject, "")) %>%
+  fill(Subject) %>% 
+  filter(Subject %in% subjects) %>% 
+  mutate(Trial = TRIAL_INDEX,
+         Slide = image_1,
+         Question = rquestion_1,
+         Image = ifelse(IA_LABEL == "Left", limage_1, rimage_1),
+         Eye = EYE_USED,
+         Dwell_Time = IA_DWELL_TIME, 
+         First_Fixation_Time = IA_FIRST_FIXATION_TIME,
+         First_Run_Dwell_Time = as.numeric(IA_FIRST_RUN_DWELL_TIME),
+         Run_Count = IA_RUN_COUNT,
+         Subject = as.numeric(Subject)) %>% 
+  dplyr::select(Subject, Trial, Slide, Question, Image, Eye, Dwell_Time, First_Fixation_Time, First_Run_Dwell_Time, Run_Count) 
+
+rm_df2 <- full_join(rm_df2, subject_info, by = "Subject")
+rm_df2$Slide = as.numeric(substr(rm_df2$Slide, 6, nchar(rm_df2$Slide)-4))
+
+averages <- rm_df2 %>% 
+  group_by(Subject, Question, Image, Gender, PhobiaRank) %>% 
+  summarize(dwell_time = mean(Dwell_Time, na.rm = TRUE),
+            first_fixation_time = mean(First_Fixation_Time, na.rm = TRUE),
+            first_run_dwell_time = mean(First_Run_Dwell_Time, na.rm = TRUE),
+            run_count = mean(Run_Count, na.rm = TRUE)) %>% 
+  mutate(image = Image)
+saveRDS(averages, "averages.RDS")
+
+# Compute within-subject SEs by image type
+within_se <- rm_df2 %>%
+     group_by(Subject, Question, Image) %>%
+     summarise(se_dwell = plotrix::std.error(Dwell_Time), 
+               se_fft = plotrix::std.error(First_Fixation_Time),
+               se_frdt = plotrix::std.error(First_Run_Dwell_Time),
+               se_rc = plotrix::std.error(Run_Count), .groups = "drop")
+
+###############################################################################
+butterfly_rm <- rm_df2 %>% 
+  filter(Question == 2)
+
+insect_eyes_rm <- rm_df2 %>% 
+  filter(Question == 3,
+         Image == "2eyedinsect"| Image == "6eyedspider")
+
+eye_size_rm <- rm_df2 %>% 
+  filter(Question == 3,
+         Image == "6ormoreeyes"| Image == "JumpingSpiders")
+
+color_rm <- rm_df2 %>% 
+  filter(Question == 4)
+
+insect_rm <- rm_df2 %>% 
+  filter(Question == 5,
+         Image == "GeneralInsect" | Image == "GeneralSpider1")
+
+myriapod_rm <- rm_df2 %>% 
+  filter(Question == 5,
+         Image == "GeneralMyriapod" | Image == "GeneralSpider2")
+
+arachnid_rm <- rm_df2 %>% 
+  filter(Question == 5,
+         Image == "NonSArachnid" | Image == "GeneralSpider3")
+
+web_rm <- rm_df2 %>% 
+  filter(Question == 6)
+
+eggs_rm <- rm_df2 %>% 
+  filter(Question == 7)
+
+eating_rm <- rm_df2 %>% 
+  filter(Question == 8)
+
+fangs_rm <- rm_df2 %>% 
+  filter(Question == 9)
+
+hairy_rm <- rm_df2 %>% 
+  filter(Question == 10)
+
+scorpion_rm <- rm_df2 %>% 
+  filter(Question == 11)
+```
+
+```{r raw graphs}
+butterfly_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_relevel(Image, "Spider", "Butterfly")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(42.5, 52.5), breaks = seq(43, 52, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+insect_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "Spider" = "GeneralSpider1",
+                            "Insect" = "GeneralInsect"),
+         Image = fct_relevel(Image, "Spider", "Insect")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(95.5, 105.5), breaks = seq(96, 105, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+
+insect_eyes_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "Spider" = "6eyedspider",
+                            "Insect Eyes" = "2eyedinsect"),
+         Image = fct_relevel(Image, "Spider", "Insect Eyes")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(63.5, 73.5), breaks = seq(64, 73, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+
+arachnid_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "Spider" = "GeneralSpider3",
+                            "Non-Spider Arachnid" = "NonSArachnid"),
+         Image = fct_relevel(Image, "Spider", "Non-Spider Arachnid")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(85.5, 95.5), breaks = seq(86, 95, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+myriapod_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "Spider" = "GeneralSpider2",
+                            "Myriapod" = "GeneralMyriapod"),
+         Image = fct_relevel(Image, "Spider", "Myriapod")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(105.5, 115.5), breaks = seq(106, 115, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+
+scorpion_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "Spider" = "Non-scorpion",
+                            "Scorpion" = "Scorpion"),
+         Image = fct_relevel(Image, "Spider", "Scorpion")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(171.5, 181.5), breaks = seq(172, 181, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+eye_size_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "Smaller Eyes" = "6ormoreeyes",
+                            "Enlarged Eyes" = "JumpingSpiders"),
+         Image = fct_relevel(Image, "Smaller Eyes", "Enlarged Eyes")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(54.5, 63.5), breaks = seq(54, 63, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+color_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "Less Color" = "JSNoColor",
+                            "More Color" = "JSColor"),
+         Image = fct_relevel(Image, "Less Color", "More Color")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(74.5, 84.5), breaks = seq(75, 84, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+web_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "No Web" = "SpiderOnGround",
+                            "Web" = "SpiderInWeb"),
+         Image = fct_relevel(Image, "No Web", "Web")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(116.5, 126.5), breaks = seq(117, 126, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+eggs_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "No Eggs" = "SpiderWOutEggs",
+                            "Eggs" = "SpiderWEggs"),
+         Image = fct_relevel(Image, "No Eggs", "Eggs")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(127.5, 137.5), breaks = seq(128, 137, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+
+fangs_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "No Fangs" = "NonobviousFangs",
+                            "Fangs" = "ObviousFangs"),
+         Image = fct_relevel(Image, "No Fangs", "Fangs")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(149.5, 159.5), breaks = seq(150, 159, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+eating_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "Not Eating" = "SpiderNotEating",
+                            "Eating" = "SpiderEating"),
+         Image = fct_relevel(Image, "Not Eating", "Eating")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(138.5, 148.5), breaks = seq(139, 148, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+
+hairy_rm %>% 
+  pivot_longer(col = c(Dwell_Time:Run_Count), values_to = "Value", names_to = "Variable") %>%
+  mutate(Variable = fct_recode(Variable, "Dwell Time (ms)" = "Dwell_Time",
+                               "First Run Dwell Time (ms)" = "First_Run_Dwell_Time",
+                               "First Fixation Time (ms)" = "First_Fixation_Time",
+                               "Run Count" = "Run_Count"),
+         Image = fct_recode(Image, "Not Hairy" = "Non-Hairy",
+                            "Hairy" = "Hairy"),
+         Image = fct_relevel(Image, "Not Hairy", "Hairy")) %>% 
+  group_by(Slide, Image, Variable) %>% 
+  summarize(mean = mean(Value, na.rm = TRUE),
+            se = plotrix::std.error(Value, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_point(aes(x = Slide, y = mean, color = Image)) +
+  geom_line(aes(x = Slide, y = mean, color = Image)) +
+  geom_ribbon(aes(x = Slide, ymax = mean + se, ymin = mean - se, fill = Image), alpha = 0.5) +
+  scale_x_continuous(limits = c(160.5, 170.5), breaks = seq(161, 170, 1)) +
+  ylab("") +
+  scale_color_manual("", values = c("#d95f02", "#7570b3")) +
+  scale_fill_manual("", values = c("#d95f02", "#7570b3")) + 
+  theme_classic() +
+  theme(axis.text = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        legend.position = "top") +
+  facet_wrap(~Variable, scales = "free_y", ncol = 1, nrow = 4)
+```
+
+REPEATED MEASURES ANALYSIS BELOW WITH ALL OBSERVATIONS
+
+```{r butterfly}
+butterfly_rm <- rm_df2 %>% 
+  filter(Question == 2)
+
+butterfly_se_dt <- within_se %>% 
+  filter(Question == 2) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = butterfly_rm)
+car::Anova(dwell_rm) # image and image x gender
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+butterfly_se_fft <- within_se %>% 
+  filter(Question == 2) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = butterfly_rm
+)
+car::Anova(fft_rm) # image only
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+butterfly_se_frdt <- within_se %>% 
+  filter(Question == 2) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = butterfly_rm)
+car::Anova(frdt_rm) # image only
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+butterfly_se_rc <- within_se %>% 
+  filter(Question == 2) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = butterfly_rm,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r insect eyes}
+insect_eyes_rm <- rm_df2 %>% 
+  filter(Question == 3,
+         Image == "2eyedinsect"| Image == "6eyedspider")
+
+insect_eyes_se_dt <- within_se %>% 
+  filter(Question == 3,
+         Image == "2eyedinsect"| Image == "6eyedspider") %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = insect_eyes_rm)
+car::Anova(dwell_rm) # image only
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm))
+ 
+insect_eyes_se_fft <- within_se %>% 
+  filter(Question == 3,
+         Image == "2eyedinsect"| Image == "6eyedspider") %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = insect_eyes_rm
+)
+car::Anova(fft_rm) # image only
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+insect_eyes_se_frdt <- within_se %>% 
+  filter(Question == 3,
+         Image == "2eyedinsect"| Image == "6eyedspider") %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = insect_eyes_rm)
+car::Anova(frdt_rm) # image only
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+insect_eyes_se_rc <- within_se %>% 
+  filter(Question == 3,
+         Image == "2eyedinsect"| Image == "6eyedspider") %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  ziformula = ~1,
+  data = insect_eyes_rm,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # Image only
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r eye size}
+eye_size_rm <- rm_df2 %>% 
+  filter(Question == 3,
+         Image == "6ormoreeyes"| Image == "JumpingSpiders")
+
+eye_size_se_dt <- within_se %>% 
+  filter(Question == 3,
+         Image == "6ormoreeyes"| Image == "JumpingSpiders") %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = eye_size_rm)
+car::Anova(dwell_rm) # image only
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+eye_size_se_fft <- within_se %>% 
+  filter(Question == 3,
+         Image == "6ormoreeyes"| Image == "JumpingSpiders") %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom1,
+  data = eye_size_rm
+)
+car::Anova(fft_rm) # image only
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+eye_size_se_frdt <- within_se %>% 
+  filter(Question == 3,
+         Image == "6ormoreeyes"| Image == "JumpingSpiders") %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = eye_size_rm)
+car::Anova(frdt_rm) # image and image x gender
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+eye_size_se_rc <- within_se %>% 
+  filter(Question == 3,
+         Image == "6ormoreeyes"| Image == "JumpingSpiders") %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  ziformula = ~1,
+  data = eye_size_rm,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r color}
+color_rm <- rm_df2 %>% 
+  filter(Question == 4)
+
+color_se_dt <- within_se %>% 
+  filter(Question == 4) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = color_rm)
+car::Anova(dwell_rm) # image only
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+color_se_fft <- within_se %>% 
+  filter(Question == 4) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = color_rm
+)
+car::Anova(fft_rm) # image only
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+color_se_frdt <- within_se %>% 
+  filter(Question == 4) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = color_rm)
+car::Anova(frdt_rm) # image and image x phobia
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+color_se_rc <- within_se %>% 
+  filter(Question == 4) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = color_rm,
+  ziformula = ~1,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r insect}
+insect_rm <- rm_df2 %>% 
+  filter(Question == 5,
+         Image == "GeneralInsect" | Image == "GeneralSpider1"
+         )
+
+insect_se_dt <- within_se %>% 
+  filter(Question == 5,
+         Image == "GeneralInsect" | Image == "GeneralSpider1"
+         ) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = insect_rm)
+car::Anova(dwell_rm) # image and image x phobia
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+insect_se_fft <- within_se %>% 
+  filter(Question == 5,
+         Image == "GeneralInsect" | Image == "GeneralSpider1"
+         ) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = insect_rm,
+  )
+car::Anova(fft_rm) # image and image x phobia
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+insect_se_frdt <- within_se %>% 
+  filter(Question == 5,
+         Image == "GeneralInsect" | Image == "GeneralSpider1"
+         ) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = insect_rm)
+car::Anova(frdt_rm) # image only
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+insect_se_rc <- within_se %>% 
+  filter(Question == 5,
+         Image == "GeneralInsect" | Image == "GeneralSpider1"
+         ) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender + Image * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = insect_rm,
+  ziformula = ~1,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r myriapod}
+myriapod_rm <- rm_df2 %>% 
+  filter(Question == 5,
+         Image == "GeneralMyriapod" | Image == "GeneralSpider2"
+         )
+
+myriapod_se_dt <- within_se %>% 
+  filter(Question == 5,
+         Image == "GeneralMyriapod" | Image == "GeneralSpider2"
+         ) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = myriapod_rm)
+car::Anova(dwell_rm) # image only
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+myriapod_se_fft <- within_se %>% 
+  filter(Question == 5,
+         Image == "GeneralMyriapod" | Image == "GeneralSpider2"
+         ) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = myriapod_rm
+)
+car::Anova(fft_rm) # image only
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+myriapod_se_frdt <- within_se %>% 
+  filter(Question == 5,
+         Image == "GeneralMyriapod" | Image == "GeneralSpider2"
+         ) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = myriapod_rm)
+car::Anova(frdt_rm) # image and gender 
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+myriapod_se_rc <- within_se %>% 
+  filter(Question == 5,
+         Image == "GeneralMyriapod" | Image == "GeneralSpider2"
+         ) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom1,
+  data = myriapod_rm,
+  ziformula = ~1,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r arachnid}
+arachnid_rm <- rm_df2 %>% 
+  filter(Question == 5,
+         Image == "NonSArachnid" | Image == "GeneralSpider3"
+         )
+
+arachnid_se_dt <- within_se %>% 
+  filter(Question == 5,
+         Image == "NonSArachnid" | Image == "GeneralSpider3"
+         ) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = arachnid_rm)
+car::Anova(dwell_rm) # image and 3 way
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+arachnid_se_fft <- within_se %>% 
+  filter(Question == 5,
+         Image == "NonSArachnid" | Image == "GeneralSpider3"
+         ) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = arachnid_rm
+)
+car::Anova(fft_rm) # image and Image x gender
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+arachnid_se_frdt <- within_se %>% 
+  filter(Question == 5,
+         Image == "NonSArachnid" | Image == "GeneralSpider3"
+         ) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = arachnid_rm)
+car::Anova(frdt_rm) # image and 3 way 
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+arachnid_se_rc <- within_se %>% 
+  filter(Question == 5,
+         Image == "NonSArachnid" | Image == "GeneralSpider3"
+         ) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom1,
+  data = arachnid_rm,
+  ziformula = ~1,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # image only
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r web}
+web_rm <- rm_df2 %>% 
+  filter(Question == 6,
+         )
+
+web_se_dt <- within_se %>% 
+  filter(Question == 6,
+         ) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = web_rm)
+car::Anova(dwell_rm) # image only
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+web_se_fft <- within_se %>% 
+  filter(Question == 6,
+         ) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom1,
+  data = web_rm
+)
+car::Anova(fft_rm) # image only
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+web_se_frdt <- within_se %>% 
+  filter(Question == 6,
+         ) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = web_rm)
+car::Anova(frdt_rm) # image only
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+web_se_rc <- within_se %>% 
+  filter(Question == 6,
+         ) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = web_rm,
+  ziformula = ~1,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r eggs}
+eggs_rm <- rm_df2 %>% 
+  filter(Question == 7,
+         )
+
+eggs_se_dt <- within_se %>% 
+  filter(Question == 7,
+         ) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = eggs_rm)
+car::Anova(dwell_rm) # image only
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+eggs_se_fft <- within_se %>% 
+  filter(Question == 7,
+         ) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = eggs_rm
+)
+car::Anova(fft_rm) # image only
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+eggs_se_frdt <- within_se %>% 
+  filter(Question == 7,
+         ) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = eggs_rm)
+car::Anova(frdt_rm) # image only
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+eggs_se_rc <- within_se %>% 
+  filter(Question == 7,
+         ) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = eggs_rm,
+  ziformula = ~1,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r eating}
+eating_rm <- rm_df2 %>% 
+  filter(Question == 8,
+         )
+
+eating_se_dt <- within_se %>% 
+  filter(Question == 8,
+         ) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = eating_rm)
+car::Anova(dwell_rm) # image only
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+eating_se_fft <- within_se %>% 
+  filter(Question == 8,
+         ) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = eating_rm
+)
+car::Anova(fft_rm) # image only
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+eating_se_frdt <- within_se %>% 
+  filter(Question == 8,
+         ) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = eating_rm)
+car::Anova(frdt_rm) # image only
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+eating_se_rc <- within_se %>% 
+  filter(Question == 8,
+         ) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = eating_rm,
+  ziformula = ~1,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r fangs}
+fangs_rm <- rm_df2 %>% 
+  filter(Question == 9,
+         )
+
+fangs_se_dt <- within_se %>% 
+  filter(Question == 9,
+         ) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = fangs_rm)
+car::Anova(dwell_rm) # image only
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+fangs_se_fft <- within_se %>% 
+  filter(Question == 9,
+         ) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = fangs_rm
+)
+car::Anova(fft_rm) # nothing
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+fangs_se_frdt <- within_se %>% 
+  filter(Question == 9,
+         ) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = fangs_rm)
+car::Anova(frdt_rm) # image only
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+fangs_se_rc <- within_se %>% 
+  filter(Question == 9,
+         ) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 + Image| Subject),
+  family = nbinom2,
+  data = fangs_rm,
+  ziformula = ~1,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r hairy}
+hairy_rm <- rm_df2 %>% 
+  filter(Question == 10)
+
+hairy_se_dt <- within_se %>% 
+  filter(Question == 10) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = hairy_rm)
+car::Anova(dwell_rm) # image only
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+hairy_se_fft <- within_se %>% 
+  filter(Question == 10) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = hairy_rm
+)
+car::Anova(fft_rm) # image only
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+hairy_se_frdt <- within_se %>% 
+  filter(Question == 10) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = hairy_rm)
+car::Anova(frdt_rm) # image only 
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+hairy_se_rc <- within_se %>% 
+  filter(Question == 10) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = hairy_rm,
+  ziformula = ~1,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r scorpion}
+scorpion_rm <- rm_df2 %>% 
+  filter(Question == 11,
+         )
+
+scorpion_se_dt <- within_se %>% 
+  filter(Question == 11,
+         ) %>% 
+  ggplot(aes(x = se_dwell)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+dwell_rm <- glmmTMB(Dwell_Time ~ Image * Gender * PhobiaRank 
+                    + (1 + Image | Subject), 
+                         ziformula = ~1,
+                         family = nbinom1, 
+                         data = scorpion_rm)
+car::Anova(dwell_rm) # image and 3 way
+res <- simulateResiduals(fittedModel = dwell_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(dwell_rm))
+qqline(resid(dwell_rm)) 
+ 
+scorpion_se_fft <- within_se %>% 
+  filter(Question == 11,
+         ) %>% 
+  ggplot(aes(x = se_fft)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Fixation Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+
+fft_rm <- glmmTMB(
+  First_Fixation_Time ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = scorpion_rm
+)
+car::Anova(fft_rm) # image x phobia
+res <- simulateResiduals(fittedModel = fft_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(fft_rm))
+qqline(resid(fft_rm)) 
+
+scorpion_se_frdt <- within_se %>% 
+  filter(Question == 11,
+         ) %>% 
+  ggplot(aes(x = se_frdt)) +
+     geom_histogram(binwidth = 25, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of First Run Dwell Time",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 500)) +
+     theme_classic()
+
+frdt_rm <- glmmTMB(
+  First_Run_Dwell_Time ~ Image * Gender * PhobiaRank + (1 + Image | Subject),
+  family = nbinom2,
+  data = scorpion_rm)
+car::Anova(frdt_rm) # image only 
+res <- simulateResiduals(fittedModel = frdt_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(frdt_rm))
+qqline(resid(frdt_rm)) 
+
+scorpion_se_rc <- within_se %>% 
+  filter(Question == 11,
+         ) %>% 
+  ggplot(aes(x = se_rc)) +
+     geom_histogram(binwidth = 0.01, fill = "steelblue", color = "black") +
+     facet_wrap(~Image) +
+     labs(
+         x = "Standard Error of Run Count",
+         y = "Number of Subjects"
+     ) +
+  scale_x_continuous(limits = c(0, 0.6)) +
+     theme_classic()
+
+rc_rm <- glmmTMB(
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
+  family = nbinom2,
+  data = scorpion_rm,
+  ziformula = ~1,
+  control = glmmTMBControl(optimizer = optim, optArgs = list(method = "BFGS", maxit = 10000)))
+car::Anova(rc_rm) # nothing
+res <- simulateResiduals(fittedModel = rc_rm, plot = TRUE)
+testDispersion(res)
+testZeroInflation(res)
+qqnorm(resid(rc_rm))
+qqline(resid(rc_rm)) 
+```
+
+```{r graphs}
+ggarrange(butterfly_se_dt, insect_se_dt, insect_eyes_se_dt, arachnid_se_dt, myriapod_se_dt, scorpion_se_dt, eye_size_se_dt, color_se_dt, web_se_dt, eggs_se_dt, fangs_se_dt, eating_se_dt, hairy_se_dt, nrow = 4, ncol = 4)
+
+ggarrange(butterfly_se_fft, insect_se_fft, insect_eyes_se_fft, arachnid_se_fft, myriapod_se_fft, scorpion_se_fft, eye_size_se_fft, color_se_fft, web_se_fft, eggs_se_fft, fangs_se_fft, eating_se_fft, hairy_se_fft, nrow = 4, ncol = 4)
+
+ggarrange(butterfly_se_frdt, insect_se_frdt, insect_eyes_se_frdt, arachnid_se_frdt, myriapod_se_frdt, scorpion_se_frdt, eye_size_se_frdt, color_se_frdt, web_se_frdt, eggs_se_frdt, fangs_se_frdt, eating_se_frdt, hairy_se_frdt, nrow = 4, ncol = 4)
+
+ggarrange(butterfly_se_rc, insect_se_rc, insect_eyes_se_rc, arachnid_se_rc, myriapod_se_rc, scorpion_se_rc, eye_size_se_rc, color_se_rc, web_se_rc, eggs_se_rc, fangs_se_rc, eating_se_rc, hairy_se_rc, nrow = 4, ncol = 4)
+```
