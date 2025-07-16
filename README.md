@@ -6,19 +6,19 @@ The following data and code are provided as a reference for the associated publi
 
 **Directories**
 
-*figures_tables*: contains all of the figures and tables for publication plus figures exploring left-right photo bias
+- *figures_tables*: contains all of the figures and tables for publication plus figures exploring left-right photo bias
 
-*pairedImages&Raw*: slide deck, raw data, and wrangled data for repeated measures tests
+- *pairedImages&Raw*: slide deck, raw data, and wrangled data for repeated measures tests
 
 **Files**
 
-*analysis_v...Rmd*: markdown files containing code for analysis; more recent drafts have higher version numbers; in analysis_v4.Rmd, first half of code is for averaging across slides and the second half is all slide observations
+- *analysis_v...Rmd*: markdown files containing code for analysis; more recent drafts have higher version numbers; in analysis_v4.Rmd, first half of code is for averaging across slides and the second half is all slide observations
 
-*averages.RDS*: contains code-calculated averages across slides; use this one, not SpiderPairedData.csv
+- *averages.RDS*: contains code-calculated averages across slides; use this one, not SpiderPairedData.csv
 
-*repeated_measures.csv*: has all observations and cleaned
+- *repeated_measures.csv*: has all observations and cleaned
 
-*SpiderPairedData.csv*: contains the hand-calculated averages across slides; use averages.RDS - butterfly is off when hand-calculated
+- *SpiderPairedData.csv*: contains the hand-calculated averages across slides; use averages.RDS - butterfly is off when hand-calculated
 
 ## Current Status
 
