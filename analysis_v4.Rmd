@@ -3269,7 +3269,7 @@ insect_se_rc <- within_se %>%
      theme_classic()
 
 rc_rm <- glmmTMB(
-  Run_Count ~ Image * Gender + Image * PhobiaRank + (1 | Subject),
+  Run_Count ~ Image * Gender * PhobiaRank + (1 | Subject),
   family = nbinom2,
   data = insect_rm,
   ziformula = ~1,
